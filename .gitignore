@@ -4,3 +4,9 @@
 .venv/
 _opam/
 .DS_Store
+/_build/
+/deps/
+/.elixir_ls/
+/.data/
+/priv/plts/*.plt*
+/cover/

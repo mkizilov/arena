@@ -15,3 +15,9 @@
 - End each turn with a short summary of changes, checks actually run, remaining limitations, and commit hash. The orchestrator will provide the next prompt only after this turn ends.
 
 Extend this file with the project's language-specific architecture and verification commands while retaining these boundaries.
+
+## Elixir architecture and verification
+
+- Keep `Arena.Game` pure and deterministic: no processes, time calls, or randomness without explicit seed state. A match process owns scheduling and state; channel modules are transport only and contain no game logic.
+- Run `mix compile --warnings-as-errors`, `mix test`, `mix format --check-formatted`, `mix credo --strict`, and `mix dialyzer`, or run all five with `mix check`.
+- Definition of done for every future task: `mix check` passes, new code has tests, documentation is updated, provide a short summary, and make a conventional-commit Git commit.
