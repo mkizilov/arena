@@ -1,13 +1,16 @@
 defmodule ArenaWeb.UserSocket do
   @moduledoc false
   use Phoenix.Socket, log: false
+  require Logger
 
   channel "match:*", ArenaWeb.MatchChannel
 
   @impl true
   def connect(%{"token" => token}, socket, _connect_info) do
     case ArenaWeb.Guest.verify(token) do
-      {:ok, guest} -> {:ok, socket |> assign(:guest, guest) |> assign(:guest_token, token)}
+      {:ok, guest} ->
+        Logger.metadata(player_id: guest.id)
+        {:ok, socket |> assign(:guest, guest) |> assign(:guest_token, token)}
       {:error, _} -> :error
     end
   end

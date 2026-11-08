@@ -13,13 +13,17 @@ defmodule Arena.GameUpdates do
   end
 
   def publish(id, previous, game, events) do
-    {event, payload} =
-      if game.tick == 1 or rem(game.tick, 30) == 0 do
-        {"state", %{state: GameJSON.render(game), events: GameJSON.events(events)}}
+    event = event(game.tick)
+
+    payload =
+      if event == "state" do
+        %{state: GameJSON.render(game), events: GameJSON.events(events)}
       else
-        {"delta", GameJSON.delta(previous, game, events)}
+        GameJSON.delta(previous, game, events)
       end
 
     Phoenix.Channel.Server.broadcast(Arena.PubSub, Arena.Match.topic(id), event, payload)
   end
+
+  def event(tick), do: if(tick == 1 or rem(tick, 30) == 0, do: "state", else: "delta")
 end

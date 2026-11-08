@@ -10,6 +10,7 @@ defmodule Arena.MatchStore do
   def finish(id, state, result), do: GenServer.call(__MODULE__, {:finish, id, state, result})
   def pending_results, do: GenServer.call(__MODULE__, :pending_results)
   def complete_result(id), do: GenServer.call(__MODULE__, {:complete_result, id})
+  def states, do: GenServer.call(__MODULE__, :states)
 
   @impl true
   def init(:ok), do: {:ok, :ets.new(__MODULE__, [:set, :private])}
@@ -42,6 +43,11 @@ defmodule Arena.MatchStore do
   def handle_call(:pending_results, _from, table) do
     results = for {{:result, id}, result} <- :ets.match_object(table, {{:result, :_}, :_}), do: {id, result}
     {:reply, results, table}
+  end
+
+  def handle_call(:states, _from, table) do
+    states = for {id, state} <- :ets.tab2list(table), is_binary(id), do: {id, state}
+    {:reply, states, table}
   end
 
   def handle_call({:complete_result, id}, _from, table) do

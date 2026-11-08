@@ -137,6 +137,7 @@ defmodule Arena.Lobby do
           {:noreply, matches}
         else
           Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_ended_unexpectedly, id})
+          Arena.Observability.remove(id)
           Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
           matches = Map.delete(matches, id)
           publish(matches)

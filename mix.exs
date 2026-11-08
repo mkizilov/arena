@@ -30,6 +30,8 @@ defmodule Arena.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.0"},
       {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_live_dashboard, "~> 0.8.7"},
+      {:prom_ex, "~> 1.11.0"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

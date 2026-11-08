@@ -5,10 +5,12 @@ defmodule Arena.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      Arena.PromEx,
       {Phoenix.PubSub, name: Arena.PubSub},
       {Registry, keys: :unique, name: Arena.MatchRegistry},
       Arena.MatchStore,
       {DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor, max_restarts: 1_000, max_seconds: 5},
+      Arena.Observability,
       Arena.Lobby,
       Arena.Matchmaker,
       {Task.Supervisor, name: Arena.TaskSupervisor},

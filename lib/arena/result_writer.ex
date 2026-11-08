@@ -90,6 +90,7 @@ defmodule Arena.ResultWriter do
   defp start_task(state, id, result) do
     try do
       task = Task.Supervisor.async_nolink(Arena.TaskSupervisor, fn ->
+        Logger.metadata(match_id: result.match_id)
         :telemetry.execute([:arena, :result_writer, :start], %{system_time: System.system_time()}, %{match_id: result.match_id, result_id: id})
 
         try do
@@ -110,7 +111,7 @@ defmodule Arena.ResultWriter do
   defp retry(state, id, match_id, reason) do
     count = Map.get(state.failures, id, 0) + 1
     delay = min(1_000 * Integer.pow(2, min(count - 1, 5)), @max_delay)
-    Logger.warning("result persistence failed for #{inspect(id)}; retrying in #{delay}ms: #{inspect(reason)}")
+    Logger.warning("result persistence failed for #{inspect(id)}; retrying in #{delay}ms: #{inspect(reason)}", match_id: match_id)
     :telemetry.execute([:arena, :result_writer, :retry], %{delay_ms: delay}, %{match_id: match_id, result_id: id})
     Process.send_after(self(), {:retry, id}, delay)
     %{state | cooling: MapSet.put(state.cooling, id), failures: Map.put(state.failures, id, count)}

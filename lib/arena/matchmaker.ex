@@ -67,7 +67,7 @@ defmodule Arena.Matchmaker do
     if Enum.any?(state.queue, &(&1.player == player)) do
       {:reply, {:error, :already_queued}, state}
     else
-      entry = %{player: player, pid: pid, ref: Process.monitor(pid)}
+      entry = %{player: player, pid: pid, ref: Process.monitor(pid), joined_at: now(state)}
       state = %{state | queue: state.queue ++ [entry]}
       state = if state.deadline, do: state, else: start_wait(state)
       {:reply, :ok, maybe_match(state)}
@@ -143,6 +143,7 @@ defmodule Arena.Matchmaker do
       {:ok, _pid} ->
         Enum.each(group, fn entry ->
           Process.demonitor(entry.ref, [:flush])
+          Arena.Telemetry.matchmaking(id, entry.player, max(now(state) - entry.joined_at, 0))
           send(entry.pid, {:match_found, id, entry.player})
         end)
 

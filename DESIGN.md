@@ -49,11 +49,13 @@ Supervision tree:
 ```mermaid
 graph TD
   App["Arena.Supervisor (rest_for_one)"]
+  App --> PromEx["Arena.PromEx (permanent)"]
   App --> PubSub["Phoenix.PubSub (permanent)"]
   App --> Registry["Arena.MatchRegistry (permanent)"]
   App --> Store["Arena.MatchStore (permanent, ETS owner)"]
   App --> Matches["Arena.MatchSupervisor (permanent, one_for_one)"]
   Matches --> Match["Arena.Match (transient, one per match)"]
+  App --> Observability["Arena.Observability (permanent)"]
   App --> Lobby["Arena.Lobby (permanent)"]
   App --> Matchmaker["Arena.Matchmaker (permanent)"]
   App --> Tasks["Arena.TaskSupervisor (permanent)"]
@@ -72,6 +74,20 @@ PostgreSQL stores `players` (guest ID, display name and insertion time), `match_
 At match end the match process atomically puts its final checkpoint and result into the ETS owner's in-memory outbox, then wakes `Arena.ResultWriter` without performing database operations. The writer starts at most two supervised tasks and retries errors with exponential backoff (one to thirty seconds). Result insertion and stat updates are one database transaction, with a unique result ID preventing duplicate wins or matches on retries or process recovery. Successful and duplicate commits publish `{:leaderboard_updated, match_id}` on `"leaderboard"`; `/leaderboard` subscribes and displays the top 20 by wins and by best score, with deterministic tie ordering. A database outage cannot block the tick loop, though the local ETS outbox can grow while writes fail. The outbox survives individual match or writer crashes but, like match checkpoints, is not durable across VM or `MatchStore` failure; queued results can be lost in that case. It is not a replacement for a durable production job queue.
 
 `mix test test/arena/results_test.exs --max-cases 2` exercises idempotence, ties, rankings, live updates, and slow/failing PostgreSQL transactions using the Ecto SQL sandbox. It requires the configured local PostgreSQL service. The current sandbox environment has neither the pinned Elixir/OTP toolchain nor accessible Hex/PostgreSQL, so these database tests and the tick-latency assertions are not verified here.
+
+## Observability
+
+Phoenix LiveDashboard is mounted at `/dashboard`, with the custom Arena page at `/dashboard/arena`; PromEx exports Prometheus text at `/metrics`. The added dependencies are `phoenix_live_dashboard ~> 0.8.7` and `prom_ex ~> 1.11.0`. The custom page shows node-local active population, tick/overrun counts and last duration, inbound/outbound message counts, and quick-play wait count and total; its in-memory counters reset on observability-process restart. PromEx separately exports histograms, counters and gauges from the same events. Metrics deliberately have no match/player labels to avoid unbounded cardinality and disclosing identifiers. The dashboard and metrics plug accept loopback `remote_ip` only; the application itself binds to loopback. A reverse proxy connecting from loopback must independently authenticate and restrict these paths, since forwarded headers are not treated as proof of client identity.
+
+| Telemetry event | Measurements | Metadata / meaning |
+| --- | --- | --- |
+| `[:arena, :match, :tick]` | `duration_ns`, `duration_us`, `tick` | `match_id`; monotonic duration covers simulation, checkpoint, result enqueue and update broadcast. |
+| `[:arena, :match, :overrun]` | `count: 1`, `duration_ns` | `match_id`; emitted and warning logged for each tick strictly longer than 1/15 second. |
+| `[:arena, :population]` | `matches`, `players` | `match_id` of the triggering update, or nil on initialization; counts running matches and their living snakes, including players within disconnect grace. Waiting/countdown/finished matches are excluded. |
+| `[:arena, :channel, :message]` | `count` | `direction`, `event`, `match_id`, `player_id`; counts application-level joins, replies, inputs and server pushes. Tick broadcasts use the match's current attached-session count as estimated fanout because Phoenix fastlane bypasses per-channel callbacks; races during join/disconnect can overcount or undercount. Transport heartbeats and protocol frames are excluded. |
+| `[:arena, :matchmaking, :wait]` | `wait_ms` | `match_id`, `player_id`; emitted for each successfully grouped quick-play player, using the matchmaker's monotonic or test clock. |
+
+Match, channel and result-write processes attach `match_id` and, where applicable, `player_id` to Logger metadata. Match/player IDs are present in telemetry metadata and logs but not Prometheus labels. `mix test test/arena/telemetry_test.exs --max-cases 2` covers event measurements, overruns, fanout, queue waits, the scrape endpoint and dashboard access. These Elixir tests and actual Prometheus/LiveDashboard startup have not been verified in the current environment because Elixir/OTP and Hex package access are unavailable.
 
 Crash notifications are in-memory, best effort, and require a running lobby and PubSub; a lobby or PubSub outage concurrent with a match crash can lose a notification. Lobby recovery restores monitoring of surviving matches, not notifications for matches that disappeared while it was down.
 

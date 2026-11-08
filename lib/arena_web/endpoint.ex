@@ -12,6 +12,8 @@ defmodule ArenaWeb.Endpoint do
   socket "/socket", ArenaWeb.UserSocket, websocket: true, longpoll: false
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
+  plug ArenaWeb.LocalObservability
+  plug PromEx.Plug, prom_ex_module: Arena.PromEx
   plug Plug.Static, at: "/", from: :arena, only: ~w(guest.js)
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]

@@ -4,6 +4,7 @@ defmodule ArenaWeb.Router do
   import Plug.Conn
   import Phoenix.Controller
   import Phoenix.LiveView.Router
+  import Phoenix.LiveDashboard.Router
 
   pipeline :api do
     plug :accepts, ["json"]
@@ -35,5 +36,10 @@ defmodule ArenaWeb.Router do
     live "/lobby", LobbyLive
     live "/leaderboard", LeaderboardLive
     live "/matches/:id", MatchLive
+  end
+
+  scope "/" do
+    pipe_through :browser
+    live_dashboard "/dashboard", metrics: Arena.Metrics, additional_pages: [arena: ArenaWeb.ObservabilityPage]
   end
 end

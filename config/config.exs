@@ -11,4 +11,6 @@ config :arena, ArenaWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
+config :logger, :console, metadata: [:match_id, :player_id]
+
 import_config "#{config_env()}.exs"

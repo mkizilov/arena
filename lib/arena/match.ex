@@ -5,6 +5,7 @@ defmodule Arena.Match do
   See DESIGN.md for the public API, timing and leave semantics.
   """
   use GenServer, restart: :transient
+  require Logger
 
   alias Arena.Game
 
@@ -48,17 +49,20 @@ defmodule Arena.Match do
   @impl true
   def init({id, opts}) do
     Process.flag(:trap_exit, true)
+    Logger.metadata(match_id: id)
 
     case Arena.MatchStore.get(id) do
       {:ok, saved} ->
         state = restore(saved)
         checkpoint(state)
+        observe(state)
         send(self(), :announce_recovery)
         {:ok, state}
 
       :error ->
         state = new_state(id, opts)
         checkpoint(state)
+        observe(state)
         {:ok, state}
     end
   end
@@ -267,7 +271,10 @@ defmodule Arena.Match do
 
   def handle_info(:announce_recovery, state) do
     if lobby = Process.whereis(Arena.Lobby), do: send(lobby, {:match_recovered, state.id, self()})
-    if state.game, do: Arena.GameUpdates.snapshot(state.id, state.game)
+    if state.game do
+      :ok = Arena.GameUpdates.snapshot(state.id, state.game)
+      Arena.Telemetry.channel(:out, "state", state.id, nil, session_count(state))
+    end
     if state.phase == :finished, do: Arena.ResultWriter.wake()
     broadcast_status(state)
     {:noreply, state}
@@ -324,6 +331,7 @@ defmodule Arena.Match do
   def terminate(reason, state) do
     if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason) do
       Arena.MatchStore.delete(state.id)
+      Arena.Observability.remove(state.id)
     end
 
     :ok
@@ -349,6 +357,8 @@ defmodule Arena.Match do
   defp leave_phase(state, _player), do: state
 
   defp advance(state) do
+    started = System.monotonic_time(:nanosecond)
+    previous_count = active_players(state)
     {game, events} = Game.tick(state.game, state.inputs)
     events = state.forfeits ++ events
     previous = state.published_game
@@ -362,8 +372,12 @@ defmodule Arena.Match do
     else
       checkpoint(state)
     end
-    Arena.GameUpdates.publish(state.id, previous, game, events)
+    :ok = Arena.GameUpdates.publish(state.id, previous, game, events)
+    Arena.Telemetry.channel(:out, Arena.GameUpdates.event(game.tick), state.id, nil, session_count(state))
     if game.result, do: broadcast_status(state)
+    if not game.result and active_players(state) != previous_count, do: observe(state)
+    elapsed = max(System.monotonic_time(:nanosecond) - started, 0)
+    Arena.Telemetry.tick(state.id, game.tick, elapsed)
     state
   end
 
@@ -504,10 +518,21 @@ defmodule Arena.Match do
   end
 
   defp broadcast_status(state) do
+    observe(state)
     Phoenix.PubSub.broadcast(
       Arena.PubSub,
       topic(state.id),
       {:match_status, state.id, state.phase, state.players}
     )
   end
+
+  defp observe(state), do: Arena.Observability.update(state.id, state.phase, active_players(state))
+
+  defp active_players(%{phase: :running, game: game}) when not is_nil(game),
+    do: Enum.count(game.snakes, fn {_id, snake} -> snake.alive end)
+
+  defp active_players(_state), do: 0
+
+  defp session_count(state),
+    do: Enum.reduce(state.connections, 0, fn {_id, sessions}, total -> total + MapSet.size(sessions) end)
 end
