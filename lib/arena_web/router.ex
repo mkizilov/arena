@@ -23,6 +23,8 @@ defmodule ArenaWeb.Router do
     pipe_through :api
     get "/", PageController, :index
     get "/guest", GuestController, :show
+    get "/healthz", HealthController, :live
+    get "/readyz", HealthController, :ready
   end
 
   scope "/", ArenaWeb do

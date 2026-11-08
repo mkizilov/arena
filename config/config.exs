@@ -2,6 +2,7 @@ import Config
 
 config :arena, ecto_repos: [Arena.Repo]
 config :arena, :build_env, config_env()
+config :arena, :expected_cluster_nodes, 1
 
 config :arena, ArenaWeb.Endpoint,
   url: [host: "localhost"],

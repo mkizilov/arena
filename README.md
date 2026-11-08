@@ -1,31 +1,74 @@
 # Arena
 
-Phoenix application foundation for a server-authoritative multiplayer snake game. The pure simulation, supervised matches, quick-play queue, private rooms, lobby, signed guest identity and match channel protocol are described in [DESIGN.md](DESIGN.md).
+Arena is a server-authoritative, real-time multiplayer snake game for two to eight guests. Matches use a 40 × 30 grid at 15 ticks per second. Food adds one point and one segment; purple power-ups add five points without growth. Hitting a wall or another snake is fatal. The last snake alive wins, or the highest score wins after three minutes. Ties are possible.
 
-## Local setup
+## Architecture
 
-Install the versions in `.tool-versions` with a project-local version manager, then install Hex and fetch dependencies with `mix local.hex` and `mix deps.get`. Start PostgreSQL with `docker compose up -d postgres` (data is stored in `.data/postgres`), run `mix ecto.setup`, then start the app with `mix phx.server`. The development endpoint is `http://127.0.0.1:22300/`; PostgreSQL listens on `127.0.0.1:22301`. Development database credentials are local-only and must not be used in production.
+```mermaid
+flowchart LR
+  Browser["Browser: LiveView + canvas"] -->|"guest token / WebSocket"| Nginx["nginx: loopback entry"]
+  Nginx --> A["Arena node 1"]
+  Nginx --> B["Arena node 2"]
+  A <--> |"libcluster DNS + Horde + PubSub"| B
+  A --> Game["Arena.Game: pure simulation"]
+  B --> Game
+  A <-->|"replicated checkpoint"| B
+  A --> DB[("PostgreSQL: results + leaderboard")]
+  B --> DB
+```
 
-Run `mix check` for compilation, tests, formatting, Credo and Dialyzer; the test alias creates and migrates its own database. Dialyzer PLTs are stored in `priv/plts/`. Stop PostgreSQL with `docker compose down` when finished.
+```mermaid
+graph TD
+  App["Arena.Supervisor: rest_for_one"]
+  App --> Prom["PromEx"]
+  App --> Discovery["libcluster"]
+  App --> PubSub["Phoenix.PubSub"]
+  App --> Registry["Horde registry"]
+  App --> Replica["MatchReplica: ETS"]
+  App --> Store["MatchStore: ETS + outbox"]
+  App --> Matches["Horde dynamic supervisor"]
+  Matches --> Match["One Match GenServer per game"]
+  App --> Obs["Observability"]
+  App --> Lobby["Lobby"]
+  App --> Matchmaker["Matchmaker"]
+  App --> Tasks["Task.Supervisor"]
+  App --> Writer["ResultWriter"]
+  App --> Repo["Ecto Repo"]
+  App --> Endpoint["Phoenix Endpoint"]
+```
 
-Visit `http://127.0.0.1:22300/lobby` for quick play, private rooms, and the open match list. The match page renders the board on a canvas; arrow keys and WASD send directions. The client stores a signed guest token in local storage. The earlier diagnostic page remains at `/play`. Run the browser module tests with `node --test --test-concurrency=2 test/js/*.test.*`.
+The core simulation has no processes, clock calls, or implicit randomness. Channels are transport only; per-match processes schedule authoritative ticks, checkpoint state and publish deltas. See [DESIGN.md](DESIGN.md) for rules, protocol, supervision, recovery and observability details.
 
-Completed matches are written asynchronously to PostgreSQL, and `/leaderboard` shows wins and best scores. Migrate the database with `mix ecto.setup` before using persistence. Retries use a node-local in-memory outbox and do not survive a VM restart; see [DESIGN.md](DESIGN.md).
+## Local development
 
-Local observability is available at `/dashboard/arena` and Prometheus metrics at `/metrics`. Both endpoints are restricted to loopback connections; a reverse proxy must also restrict access. See [DESIGN.md](DESIGN.md) for event definitions and measurement limitations.
+Install the versions in `.tool-versions` and dependencies **inside this repository**, then run `mix local.hex`, `mix deps.get`, `mix ecto.setup`, and `mix phx.server`. PostgreSQL is configured at `127.0.0.1:22301`; `docker-compose.yml` describes a project-local database for environments where Docker is explicitly authorized. This sandbox must not use the host Docker socket. The app listens on `http://127.0.0.1:22300`; open `/lobby`, use quick play or a private room, and play with arrow keys or WASD. `/leaderboard` shows completed-match statistics.
 
-The separate `loadtest/` Mix project contains Slipstream WebSocket bots. [LOADTEST.md](LOADTEST.md) describes its bounded loopback-only protocol, measurement method and the currently unverified production runs.
+`/healthz` is process liveness and does not query dependencies. `/readyz` returns 200 only when PostgreSQL responds and both Horde membership views contain at least `ARENA_CLUSTER_EXPECTED_NODES` connected nodes, including the current node; otherwise it returns 503 with boolean checks. Readiness is not proof of replica durability or partition safety.
 
-Game modules live in `assets/js/game/` and are embedded into the application at compile time; edits trigger recompilation. The browser receives Phoenix and LiveView's prebuilt ES modules from their installed dependencies, so no Node package installation or separate asset build is required. `floki` is a test-only dependency for LiveView tests.
+## Production release and Compose cluster
 
-Match updates use deltas with periodic full snapshots and gap recovery; the reproducible synthetic bandwidth comparison is in [DESIGN.md](DESIGN.md).
+Build locally with `MIX_ENV=prod mix deps.get` and `MIX_ENV=prod mix release`, then use `_build/prod/rel/arena/bin/arena`. Runtime requires `DATABASE_URL` and `SECRET_KEY_BASE`; `PHX_SERVER=1` enables HTTP. `PORT` defaults to 22300, `POOL_SIZE` to 10, and `ARENA_CLUSTER_EXPECTED_NODES` to 1. For distributed releases, configure a project-local `RELEASE_COOKIE`, `RELEASE_NODE`, `RELEASE_DISTRIBUTION`, loopback EPMD/distribution ports, and the libcluster strategy as described in [DESIGN.md](DESIGN.md). Run migrations with `bin/arena eval 'Arena.Release.migrate()'`. Do not commit secrets or generated release files.
 
-Match processes checkpoint to ETS and replicate checkpoints to another connected node when available; Horde places and recovers them across the cluster. Disconnected players have a ten-second reconnection grace period. Cluster setup, the checkpoint limitations, and test prerequisites are documented in [DESIGN.md](DESIGN.md).
+`Dockerfile` is a multi-stage production release build. `docker-compose.prod.yml` defines PostgreSQL, a one-shot migration, two DNS-clustered app nodes and an nginx WebSocket proxy. Container HTTP listeners bind their private container interfaces; host ports 22300 and 22301 are published on loopback only. PostgreSQL data is retained at `./.data/postgres-prod`; never point the example at an existing database you do not intend to use. In an environment **outside this sandbox** where Docker is explicitly authorized, set `ARENA_DB_PASSWORD`, `ARENA_DATABASE_URL` (for example `ecto://postgres:<URL-encoded-password>@postgres:5432/arena_prod`), `SECRET_KEY_BASE` and `ARENA_CLUSTER_COOKIE` in the environment, then run:
 
-Match state has explicit upgrade versions; the power-up rule, manual remote-console demonstration, and its limitations are documented in [UPGRADES.md](UPGRADES.md).
+```sh
+docker compose -p arena-prod -f docker-compose.prod.yml up --build -d
+```
 
-Production requires `DATABASE_URL` and `SECRET_KEY_BASE`; set `PHX_SERVER` to start the HTTP endpoint and `PHX_HOST` to its public hostname. TLS termination is expected upstream.
+Visit `http://127.0.0.1:22300/lobby`. With this disposable stack, `scripts/compose_failover.sh --confirm` creates a manual-tick demo match, verifies its replica, kills **only app1**, checks that app2 resumes the identical tick-3 game and advances it, and probes nginx liveness. It then attempts to stop its own match and restore app1. Set `ARENA_COMPOSE_PROJECT` if using a different Compose project name. It prints any cleanup failure; it does not remove database data. The script verifies process/state recovery, not a live player's WebSocket reconnection. Afterward use `docker compose -p arena-prod -f docker-compose.prod.yml down` to stop the stack; do not delete pre-existing data. No Docker daemon was operated in this sandbox.
 
-## Scaffold provenance
+## Testing and measurements
 
-The shell environment used for this initial stage had neither Erlang nor Elixir and could not resolve GitHub or Hex. Consequently the requested `mix phx.new arena --no-mailer` generator could not be run. This is a manually written minimal Phoenix/Ecto foundation, not generator output; dependency resolution, formatting, compilation and runtime behavior must be verified in an environment with the pinned toolchain and package access.
+- `mix check` runs warnings-as-errors compilation, ExUnit, formatting, strict Credo and Dialyzer. The three-node cluster test requires a named loopback VM and project-scoped EPMD/distribution ports; see [DESIGN.md](DESIGN.md). It fails with a prerequisite message rather than silently skipping without distribution.
+- ExUnit includes StreamData properties for deterministic simulation and delta reconstruction, Ecto sandbox persistence tests, channel/LiveView tests, and 50 seeded crash/recovery games. These require the pinned toolchain, dependencies and a local test database.
+- `node --test --test-concurrency=2 test/js/*.test.*` exercises client behavior and a **mocked**, no-Docker failover-script flow.
+- `loadtest/` contains Slipstream WebSocket bots for 100, 1,000 and 5,000-client production runs. **No actual load runs, profiling or before/after bottleneck fix have been verified here**; [LOADTEST.md](LOADTEST.md) contains the explicit missing-result table and reproducible procedure. A synthetic quiet-tick fixture measured 1,373-byte full frames versus 731-byte deltas (45.2% less over a 30-tick cycle), excluding tick timestamps and transport overhead; this is not a load test.
+- [UPGRADES.md](UPGRADES.md) describes versioned state migrations and an unverified live-upgrade procedure.
+
+## Known limitations
+
+- The supplied environment lacks Erlang/Elixir and local PostgreSQL, and shell DNS cannot resolve Hex. Release builds, migrations, health checks, cluster/failover integration, Ecto tests and `mix check` are unverified. Compose syntax can be checked without Docker, but the image, proxy and WebSocket behavior have not been run here. There is no generated `mix.lock`, so transitive dependency resolution is not reproducible yet.
+- Horde and its registry are eventually consistent, not a consensus or fencing system; network partitions can create competing owners. Checkpoints and the retry outbox are volatile ETS, and losing both owner and replica can lose a game; pending results can be lost on a VM/store failure. See [DESIGN.md](DESIGN.md).
+- Guests use bearer tokens, private codes are not authentication, and input/code-guess rate limiting is not implemented. Use TLS and an appropriate authentication/authorization layer before external deployment. `/metrics`, `/dashboard` and load-test measurements are loopback-restricted; an external reverse proxy must restrict them independently.
+- `/readyz` intentionally reports 503 on the surviving node while a two-node deployment is degraded. nginx's default passive upstream behavior does not automatically remove an upstream based on `/readyz`, and it does not provide a high-availability control plane.
+- The original Phoenix generator could not be run in this environment; the foundation was written manually. The release image, hot upgrade and real load results must be validated before production use.
