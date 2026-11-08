@@ -34,6 +34,7 @@ defmodule ArenaWeb.LobbyLive do
     ~H"""
     <main>
       <h1>Arena lobby</h1>
+      <a href="/leaderboard">Leaderboard</a>
       <p :if={@guest}>Playing as {@guest.name}</p>
       <p :if={!@guest && !@identity_ready}>Connecting guest identity…</p>
       <p :if={!@guest && @identity_ready} role="alert">Guest identity unavailable. Reload to retry.</p>

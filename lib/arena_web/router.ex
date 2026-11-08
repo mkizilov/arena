@@ -33,6 +33,7 @@ defmodule ArenaWeb.Router do
   scope "/", ArenaWeb do
     pipe_through :browser
     live "/lobby", LobbyLive
+    live "/leaderboard", LeaderboardLive
     live "/matches/:id", MatchLive
   end
 end

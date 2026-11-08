@@ -12,6 +12,7 @@ defmodule Arena.Application do
       Arena.Lobby,
       Arena.Matchmaker,
       {Task.Supervisor, name: Arena.TaskSupervisor},
+      Arena.ResultWriter,
       Arena.Repo,
       ArenaWeb.Endpoint
     ]

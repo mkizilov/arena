@@ -11,7 +11,7 @@ defmodule ArenaWeb.MatchChannel do
   @impl true
   def join("match:" <> id, _payload, socket) when byte_size(id) > 0 do
     with {:ok, guest} <- Guest.verify(socket.assigns[:guest_token]),
-         {:ok, snapshot} <- match_call(fn -> Match.attach(id, guest.id, self()) end) do
+         {:ok, snapshot} <- match_call(fn -> Match.attach(id, guest.id, self(), guest.name) end) do
       send(self(), :after_join)
       socket = socket |> assign(:match_id, id) |> assign(:guest, guest)
       {:ok,

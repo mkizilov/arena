@@ -10,6 +10,8 @@ Run `mix check` for compilation, tests, formatting, Credo and Dialyzer; the test
 
 Visit `http://127.0.0.1:22300/lobby` for quick play, private rooms, and the open match list. The match page renders the board on a canvas; arrow keys and WASD send directions. The client stores a signed guest token in local storage. The earlier diagnostic page remains at `/play`. Run the browser module tests with `node --test --test-concurrency=2 test/js/*.test.*`.
 
+Completed matches are written asynchronously to PostgreSQL, and `/leaderboard` shows wins and best scores. Migrate the database with `mix ecto.setup` before using persistence. Retries use a node-local in-memory outbox and do not survive a VM restart; see [DESIGN.md](DESIGN.md).
+
 Game modules live in `assets/js/game/` and are embedded into the application at compile time; edits trigger recompilation. The browser receives Phoenix and LiveView's prebuilt ES modules from their installed dependencies, so no Node package installation or separate asset build is required. `floki` is a test-only dependency for LiveView tests.
 
 Match updates use deltas with periodic full snapshots and gap recovery; the reproducible synthetic bandwidth comparison is in [DESIGN.md](DESIGN.md).

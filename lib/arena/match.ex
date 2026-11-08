@@ -31,7 +31,8 @@ defmodule Arena.Match do
   def leave(id, player), do: GenServer.call(via(id), {:leave, player})
 
   @doc "Attaches a player session, reclaiming their snake during the reconnect grace period."
-  def attach(id, player, pid), do: GenServer.call(via(id), {:attach, player, pid})
+  def attach(id, player, pid, display_name \\ nil),
+    do: GenServer.call(via(id), {:attach, player, pid, display_name})
 
   @doc "Buffers a player's latest valid direction until the next tick."
   def input(id, player, direction), do: GenServer.call(via(id), {:input, player, direction})
@@ -77,8 +78,10 @@ defmodule Arena.Match do
 
     state = %{
       id: id,
+      result_id: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false),
       phase: phase,
       players: players,
+      names: %{},
       visibility: Keyword.get(opts, :visibility, :public),
       game: nil,
       published_game: nil,
@@ -158,7 +161,7 @@ defmodule Arena.Match do
     end
   end
 
-  def handle_call({:attach, player, pid}, _from, state) when is_pid(pid) do
+  def handle_call({:attach, player, pid, display_name}, _from, state) when is_pid(pid) do
     cond do
       state.phase == :finished ->
         {:reply, {:error, :finished}, state}
@@ -175,6 +178,7 @@ defmodule Arena.Match do
       player in state.players ->
         reconnecting = Map.has_key?(state.disconnects, player)
         state = attach_session(state, player, pid)
+        state = remember_name(state, player, display_name)
         checkpoint(state)
         if reconnecting do
           Phoenix.PubSub.broadcast(Arena.PubSub, topic(state.id), {:match_reconnected, state.id, player})
@@ -201,6 +205,7 @@ defmodule Arena.Match do
               state
           end
         state = attach_session(state, player, pid)
+        state = remember_name(state, player, display_name)
         checkpoint(state)
         broadcast_status(state)
         {:reply, {:ok, snapshot_state(state)}, state}
@@ -263,6 +268,7 @@ defmodule Arena.Match do
   def handle_info(:announce_recovery, state) do
     if lobby = Process.whereis(Arena.Lobby), do: send(lobby, {:match_recovered, state.id, self()})
     if state.game, do: Arena.GameUpdates.snapshot(state.id, state.game)
+    if state.phase == :finished, do: Arena.ResultWriter.wake()
     broadcast_status(state)
     {:noreply, state}
   end
@@ -349,7 +355,13 @@ defmodule Arena.Match do
     state = %{state | game: game, published_game: game, inputs: %{}, forfeits: []}
 
     state = if game.result, do: state |> set_phase(:finished) |> arm(:shutdown, state.grace_ms), else: state
-    checkpoint(state)
+    if game.result do
+      result = Arena.Results.build(state.id, state.result_id, game, state.names)
+      :ok = Arena.MatchStore.finish(state.id, checkpoint_data(state), result)
+      Arena.ResultWriter.wake()
+    else
+      checkpoint(state)
+    end
     Arena.GameUpdates.publish(state.id, previous, game, events)
     if game.result, do: broadcast_status(state)
     state
@@ -393,9 +405,15 @@ defmodule Arena.Match do
   end
 
   defp checkpoint(state) do
-    saved = %{state | timer: nil, monitors: %{}, disconnect_timers: %{}}
-    :ok = Arena.MatchStore.put(state.id, saved)
+    :ok = Arena.MatchStore.put(state.id, checkpoint_data(state))
   end
+
+  defp checkpoint_data(state), do: %{state | timer: nil, monitors: %{}, disconnect_timers: %{}}
+
+  defp remember_name(state, player, display_name) when is_binary(display_name),
+    do: %{state | names: Map.put(state.names, player, display_name)}
+
+  defp remember_name(state, _player, _display_name), do: state
 
   defp restore(saved) do
     state = %{saved | timer: nil, monitors: %{}, disconnect_timers: %{}}
