@@ -47,10 +47,19 @@ defmodule Arena.Match do
       {System.monotonic_time(), System.unique_integer([:positive]), :erlang.phash2(id)}
     end)
 
+    players = Keyword.get(opts, :players, [])
+
+    if not is_list(players) or length(players) > 8 or length(Enum.uniq(players)) != length(players) do
+      raise ArgumentError, "initial players must be a list of at most eight unique IDs"
+    end
+
+    phase = if length(players) >= 2, do: :countdown, else: :waiting
+
     state = %{
       id: id,
-      phase: :waiting,
-      players: [],
+      phase: phase,
+      players: players,
+      visibility: Keyword.get(opts, :visibility, :public),
       game: nil,
       inputs: %{},
       forfeits: [],
@@ -64,12 +73,19 @@ defmodule Arena.Match do
       scheduled_tick: 0
     }
 
-    {:ok, arm(state, :idle, state.idle_ms)}
+    state =
+      if phase == :countdown,
+        do: arm(state, :countdown, state.countdown_ms),
+        else: arm(state, :idle, state.idle_ms)
+
+    {:ok, state}
   end
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    {:reply, %{phase: state.phase, players: state.players, game: state.game}, state}
+    {:reply,
+     %{phase: state.phase, players: state.players, game: state.game, visibility: state.visibility},
+     state}
   end
 
   def handle_call({:join, player}, _from, state) do
