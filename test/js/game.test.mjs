@@ -131,8 +131,12 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   assert.deepEqual(sent[1], ["input", { direction: "up" }]);
   handlers.state({ state: { tick: 1, width: 40, height: 30, food: null, snakes: { a: { body: [[1, 1]], score: 2, alive: true } }, result: null } });
   assert.equal(scores.rows[0].textContent, "a: 2");
-  handlers.state({ state: { tick: 1, snakes: {}, result: null } });
+  handlers.state({ state: { tick: 0, snakes: {}, result: null } });
   assert.equal(scores.rows[0].textContent, "a: 2");
+  handlers.state({ state: { tick: 1, width: 40, height: 30, food: null, power_up: [4, 5], snakes: { a: { body: [[1, 1]], score: 3, alive: true } }, result: null } });
+  assert.equal(scores.rows[0].textContent, "a: 3");
+  assert.deepEqual(hook.current.power_up, [4, 5]);
+  assert.equal(hook.previous, null);
   handlers.delta({ tick: 2, moves: { a: { head: [2, 1], tail_moved: true, direction: "right" } }, deaths: [], scores: {}, events: [], server_tick_at_ms: 1234 });
   assert.equal(hook.current.tick, 2);
   assert.equal(hook.previous.tick, 1);
@@ -153,6 +157,10 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   assert.match(status.textContent, /Starting in [123]/);
   handlers.state({ state: { tick: 6, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: { winners: ["a"], reason: "last_alive" } } });
   assert.match(result.textContent, /a \(last_alive\)/);
+  handlers.state({ state: { tick: 6, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: null } });
+  assert.equal(result.textContent, "");
+  handlers.state({ state: { tick: 6, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: false } }, result: null } });
+  assert.equal(scores.rows[0].textContent, "a: 2 (out)");
   hook.destroyed();
   assert.equal(removed, true);
   assert.equal(channel.left, true);

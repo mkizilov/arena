@@ -87,7 +87,7 @@ export function createGameHook(Socket) {
   },
 
   setState(state) {
-    if (!state || (this.current && state.tick <= this.current.tick)) return;
+    if (!state || (this.current && state.tick < this.current.tick)) return;
     this.resyncing = false;
     this.previous = this.current && state.tick === this.current.tick + 1 ? this.current : null;
     this.current = state;
@@ -101,6 +101,8 @@ export function createGameHook(Socket) {
     if (state.result) {
       const winners = state.result.winners.length ? state.result.winners.join(", ") : "No winner";
       this.result.textContent = `Result: ${winners} (${state.result.reason})`;
+    } else {
+      this.result.textContent = "";
     }
   },
 
