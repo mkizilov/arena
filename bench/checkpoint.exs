@@ -1,7 +1,8 @@
 # Run with: mix run --no-start bench/checkpoint.exs
 {:ok, _pid} = Arena.MatchStore.start_link([])
+{:ok, _replica} = Arena.MatchReplica.start_link([])
 game = Arena.Game.new(Enum.to_list(1..8), {1, 2, 3})
-checkpoint = %{game: game, published_game: game, inputs: %{}, players: Enum.to_list(1..8)}
+checkpoint = %{result_id: "benchmark-instance", game: game, published_game: game, inputs: %{}, players: Enum.to_list(1..8)}
 iterations = 100_000
 
 {baseline_us, _} = :timer.tc(fn -> Enum.each(1..iterations, fn _ -> :ok end) end)

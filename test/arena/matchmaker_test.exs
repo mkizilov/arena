@@ -10,8 +10,8 @@ defmodule Arena.MatchmakerTest do
 
   defp cleanup_match(id) do
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
@@ -116,7 +116,7 @@ defmodule Arena.MatchmakerTest do
   test "the lobby publishes public player counts and removes closed matches" do
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Lobby.topic())
     id = "lobby-test-#{System.unique_integer([:positive, :monotonic])}"
-    {:ok, pid} = Match.start_match(id, countdown_ms: 60_000)
+    {:ok, _pid} = Match.start_match(id, countdown_ms: 60_000)
     cleanup_match(id)
     assert_lobby_count(id, 0)
     assert :ok = Match.join(id, :a)
@@ -125,7 +125,7 @@ defmodule Arena.MatchmakerTest do
     assert_lobby_count(id, 2)
     for player <- 3..8, do: assert(:ok = Match.join(id, player))
     assert_lobby_count(id, nil)
-    :ok = DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+    :ok = Match.stop(id)
     assert_lobby_count(id, nil)
   end
 

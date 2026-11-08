@@ -1,0 +1,12 @@
+.git/
+.agent-local/
+.opencode/
+.tools/
+.toolchain/
+.venv/
+.data/
+_build/
+deps/
+priv/plts/
+loadtest/_build/
+loadtest/deps/

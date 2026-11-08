@@ -1,0 +1,37 @@
+x-arena: &arena
+  build:
+    context: .
+    dockerfile: Dockerfile.cluster
+  environment:
+    DATABASE_URL: ecto://postgres:postgres@postgres:5432/arena_dev
+    SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set a project-local secret}
+    RELEASE_COOKIE: ${ARENA_CLUSTER_COOKIE:?set a project-local distribution cookie}
+    RELEASE_DISTRIBUTION: name
+    ARENA_CLUSTER_STRATEGY: dns
+    ARENA_CLUSTER_DNS: arena-node
+    ARENA_NODE_BASENAME: arena
+    ARENA_CONTAINER_HTTP: "1"
+    ERL_EPMD_PORT: "22351"
+    ERL_AFLAGS: "+S 2:2 -kernel inet_dist_listen_min 22352 inet_dist_listen_max 22359"
+    PHX_SERVER: "1"
+    PORT: "22300"
+  entrypoint:
+    - /bin/sh
+    - -ec
+    - 'export RELEASE_NODE="arena@$$(hostname -i | cut -d " " -f 1)"; exec /app/_build/prod/rel/arena/bin/arena start'
+  depends_on:
+    - postgres
+  networks:
+    default:
+      aliases: [arena-node]
+
+services:
+  arena1:
+    <<: *arena
+    ports: ["127.0.0.1:22300:22300"]
+  arena2:
+    <<: *arena
+    ports: ["127.0.0.1:22302:22300"]
+  arena3:
+    <<: *arena
+    ports: ["127.0.0.1:22303:22300"]

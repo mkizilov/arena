@@ -32,12 +32,15 @@ defmodule Arena.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_live_dashboard, "~> 0.8.7"},
       {:prom_ex, "~> 1.11.0"},
+      {:libcluster, "~> 3.6.0"},
+      {:horde, "~> 0.10.0"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:stream_data, "~> 1.1", only: :test},
       {:floki, ">= 0.36.0", only: :test},
+      {:local_cluster, "~> 2.1.0", only: :test},
       {:excoveralls, "~> 0.18", only: :test}
     ]
   end

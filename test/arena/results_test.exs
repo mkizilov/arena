@@ -36,8 +36,8 @@ defmodule Arena.ResultsTest do
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
     {:ok, _pid} = Match.start_match(id, players: players, countdown_ms: 0, manual: true)
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)

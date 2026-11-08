@@ -38,7 +38,7 @@ The runner only connects to `127.0.0.1` on ports 22300–22399 and rejects a ser
 4. During a representative steady run, profile **at most two** match processes for a bounded three seconds in the server's IEx session:
 
    ```elixir
-   pids = Arena.MatchSupervisor |> DynamicSupervisor.which_children() |> Enum.flat_map(fn {_, pid, _, _} -> if is_pid(pid), do: [pid], else: [] end) |> Enum.take(2)
+   pids = Arena.MatchSupervisor |> Horde.DynamicSupervisor.which_children() |> Enum.flat_map(fn {_, pid, _, _} -> if is_pid(pid) and node(pid) == node(), do: [pid], else: [] end) |> Enum.take(2)
    if pids == [], do: raise("no active matches to profile")
    :eprof.start()
    :eprof.start_profiling(pids)

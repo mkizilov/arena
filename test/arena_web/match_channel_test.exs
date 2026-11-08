@@ -13,8 +13,8 @@ defmodule ArenaWeb.MatchChannelTest do
     {:ok, _pid} = Match.start_match(id, opts)
 
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{current, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, current)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
@@ -92,7 +92,7 @@ defmodule ArenaWeb.MatchChannelTest do
     assert {:ok, _, _channel} = subscribe_and_join(socket, MatchChannel, "match:" <> id)
     assert :ok = Match.tick(id)
     assert_push "state", %{state: %{tick: 1}}
-    [{pid, _}] = Registry.lookup(Arena.MatchRegistry, id)
+    [{pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
     Process.exit(pid, :kill)
     assert_push "match_recovered", %{}, 1_000
     assert_push "state", %{state: %{tick: 1}}, 1_000

@@ -20,7 +20,7 @@ Game modules live in `assets/js/game/` and are embedded into the application at 
 
 Match updates use deltas with periodic full snapshots and gap recovery; the reproducible synthetic bandwidth comparison is in [DESIGN.md](DESIGN.md).
 
-Match processes checkpoint to a separate in-memory ETS owner and recover after abnormal exits. Disconnected players have a ten-second reconnection grace period. The chaos test and checkpoint microbenchmark commands and node-local durability limitations are documented in [DESIGN.md](DESIGN.md).
+Match processes checkpoint to ETS and replicate checkpoints to another connected node when available; Horde places and recovers them across the cluster. Disconnected players have a ten-second reconnection grace period. Cluster setup, the checkpoint limitations, and test prerequisites are documented in [DESIGN.md](DESIGN.md).
 
 Production requires `DATABASE_URL` and `SECRET_KEY_BASE`; set `PHX_SERVER` to start the HTTP endpoint and `PHX_HOST` to its public hostname. TLS termination is expected upstream.
 

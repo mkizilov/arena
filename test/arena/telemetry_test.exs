@@ -33,8 +33,8 @@ defmodule Arena.TelemetryTest do
     {:ok, _pid} = Match.start_match(id, players: players, countdown_ms: 0, manual: true)
 
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
@@ -49,7 +49,7 @@ defmodule Arena.TelemetryTest do
     players = before.active_players + 2
     id = start_match([:a, :b])
     assert_receive {:telemetry, [:arena, :population], %{matches: ^matches, players: ^players}, %{match_id: ^id}}, 1_000
-    [{pid, _}] = Registry.lookup(Arena.MatchRegistry, id)
+    [{pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
     owner = self()
     :sys.replace_state(pid, fn state -> send(owner, {:match_logger, Logger.metadata()}); state end)
     assert_receive {:match_logger, match_metadata}
@@ -108,8 +108,8 @@ defmodule Arena.TelemetryTest do
     assert_receive {:telemetry, [:arena, :matchmaking, :wait], %{wait_ms: 6_000}, %{match_id: ^id, player_id: :b}}
 
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)

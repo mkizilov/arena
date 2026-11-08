@@ -27,7 +27,7 @@ defmodule Arena.Observability do
     matches =
       Arena.MatchStore.states()
       |> Enum.reduce(%{}, fn {id, state}, acc ->
-        if Registry.lookup(Arena.MatchRegistry, id) != [] do
+        if Enum.any?(Horde.Registry.lookup(Arena.MatchRegistry, id), fn {pid, _} -> node(pid) == node() end) do
           Map.put(acc, id, population(state.phase, state.game))
         else
           acc

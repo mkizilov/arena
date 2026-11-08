@@ -9,8 +9,8 @@ defmodule Arena.MatchRecoveryTest do
     {:ok, _pid} = Match.start_match(id, Keyword.merge([players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true], opts))
 
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
@@ -30,7 +30,7 @@ defmodule Arena.MatchRecoveryTest do
   end
 
   defp crash_and_wait(id) do
-    [{old, _}] = Registry.lookup(Arena.MatchRegistry, id)
+    [{old, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
     ref = Process.monitor(old)
     Process.exit(old, :kill)
     assert_receive {:DOWN, ^ref, :process, ^old, :killed}, 1_000
@@ -52,7 +52,7 @@ defmodule Arena.MatchRecoveryTest do
     assert :ok = Match.tick(id)
     before = Match.snapshot(id).game
     assert {:value, {6, 4}} = :queue.peek(before.snakes.a.body)
-    [{pid, _}] = Registry.lookup(Arena.MatchRegistry, id)
+    [{pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
     deadline = :sys.get_state(pid).disconnects[:a]
     recovered = crash_and_wait(id)
     assert :sys.get_state(recovered).disconnects[:a] == deadline
@@ -128,8 +128,7 @@ defmodule Arena.MatchRecoveryTest do
       end)
 
       assert result != nil
-      [{pid, _}] = Registry.lookup(Arena.MatchRegistry, id)
-      :ok = DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      :ok = Match.stop(id)
       assert :error = MatchStore.get(id)
       :ok = Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
       rng

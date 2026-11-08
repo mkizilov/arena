@@ -9,7 +9,7 @@ defmodule Arena.MatchTest do
     {:ok, pid} = Match.start_match(id, Keyword.merge([seed: {1, 2, 3}, manual: true], opts))
 
     on_exit(fn ->
-      if Process.alive?(pid), do: DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      if Process.alive?(pid), do: Match.stop(id)
     end)
 
     {id, pid}
@@ -49,7 +49,7 @@ defmodule Arena.MatchTest do
     {id, pid} = start_match(idle_ms: 30)
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
-    assert Registry.lookup(Arena.MatchRegistry, id) == []
+    assert Horde.Registry.lookup(Arena.MatchRegistry, id) == []
   end
 
   test "latest input is applied once per manual tick and each tick is broadcast" do

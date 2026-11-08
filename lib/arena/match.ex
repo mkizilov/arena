@@ -14,12 +14,18 @@ defmodule Arena.Match do
 
   @doc "Starts a uniquely registered match under the match supervisor."
   def start_match(id, opts \\ []) when is_binary(id) and byte_size(id) > 0 do
+    opts = Keyword.put_new_lazy(opts, :instance_id, fn -> :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false) end)
     Arena.Lobby.start_match(id, opts)
   end
 
   @doc false
+  def child_spec({id, opts}) do
+    %{id: {__MODULE__, id}, start: {__MODULE__, :start_link, [{id, opts}]}, restart: :transient, shutdown: 15_000}
+  end
+
+  @doc false
   def start_link({id, opts}) do
-    GenServer.start_link(__MODULE__, {id, opts}, name: via(id))
+    GenServer.start_link(__MODULE__, {id, opts}, name: via(id), timeout: 10_000)
   end
 
   @doc "Returns the PubSub topic for a match ID."
@@ -44,14 +50,17 @@ defmodule Arena.Match do
   @doc "Advances one running tick when the match was started in manual mode."
   def tick(id), do: GenServer.call(via(id), :tick)
 
-  defp via(id), do: {:via, Registry, {Arena.MatchRegistry, id}}
+  @doc "Stops a match normally, deleting its checkpoint."
+  def stop(id), do: GenServer.call(via(id), :stop)
+
+  defp via(id), do: {:via, Horde.Registry, {Arena.MatchRegistry, id}}
 
   @impl true
   def init({id, opts}) do
     Process.flag(:trap_exit, true)
     Logger.metadata(match_id: id)
 
-    case Arena.MatchStore.get(id) do
+    case Arena.MatchStore.get(id, Keyword.fetch!(opts, :instance_id)) do
       {:ok, saved} ->
         state = restore(saved)
         checkpoint(state)
@@ -59,11 +68,18 @@ defmodule Arena.Match do
         send(self(), :announce_recovery)
         {:ok, state}
 
-      :error ->
+      :new ->
         state = new_state(id, opts)
         checkpoint(state)
         observe(state)
+        send(self(), :announce_started)
         {:ok, state}
+
+      :error ->
+        {:stop, :checkpoint_unavailable}
+
+      :deleted ->
+        :ignore
     end
   end
 
@@ -82,7 +98,7 @@ defmodule Arena.Match do
 
     state = %{
       id: id,
-      result_id: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false),
+      result_id: Keyword.fetch!(opts, :instance_id),
       phase: phase,
       players: players,
       names: %{},
@@ -121,6 +137,8 @@ defmodule Arena.Match do
   def handle_call(:snapshot, _from, state) do
     {:reply, snapshot_state(state), state}
   end
+
+  def handle_call(:stop, _from, state), do: {:stop, :normal, :ok, state}
 
   def handle_call({:join, player}, _from, state) do
     cond do
@@ -270,13 +288,18 @@ defmodule Arena.Match do
   def handle_info({:timer, _kind, _token}, state), do: {:noreply, state}
 
   def handle_info(:announce_recovery, state) do
-    if lobby = Process.whereis(Arena.Lobby), do: send(lobby, {:match_recovered, state.id, self()})
+    Phoenix.PubSub.broadcast(Arena.PubSub, "arena:matches", {:match_registered, state.id, self(), :recovered})
     if state.game do
       :ok = Arena.GameUpdates.snapshot(state.id, state.game)
       Arena.Telemetry.channel(:out, "state", state.id, nil, session_count(state))
     end
     if state.phase == :finished, do: Arena.ResultWriter.wake()
     broadcast_status(state)
+    {:noreply, state}
+  end
+
+  def handle_info(:announce_started, state) do
+    Phoenix.PubSub.broadcast(Arena.PubSub, "arena:matches", {:match_registered, state.id, self(), :started})
     {:noreply, state}
   end
 
@@ -329,8 +352,11 @@ defmodule Arena.Match do
 
   @impl true
   def terminate(reason, state) do
-    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason) do
+    if reason == :normal do
       Arena.MatchStore.delete(state.id)
+    end
+
+    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason) do
       Arena.Observability.remove(state.id)
     end
 
@@ -423,7 +449,12 @@ defmodule Arena.Match do
     :ok = Arena.MatchStore.put(state.id, checkpoint_data(state))
   end
 
-  defp checkpoint_data(state), do: %{state | timer: nil, monitors: %{}, disconnect_timers: %{}}
+  defp checkpoint_data(state) do
+    state
+    |> Map.merge(%{timer: nil, monitors: %{}, disconnect_timers: %{}})
+    |> Map.put(:checkpoint_node, node())
+    |> Map.put(:checkpoint_offset_ms, System.system_time(:millisecond) - System.monotonic_time(:millisecond))
+  end
 
   defp remember_name(state, player, display_name) when is_binary(display_name),
     do: %{state | names: Map.put(state.names, player, display_name)}
@@ -431,6 +462,7 @@ defmodule Arena.Match do
   defp remember_name(state, _player, _display_name), do: state
 
   defp restore(saved) do
+    saved = translate_deadlines(saved)
     state = %{saved | timer: nil, monitors: %{}, disconnect_timers: %{}}
 
     state =
@@ -458,6 +490,34 @@ defmodule Arena.Match do
         state
     end
   end
+
+  defp translate_deadlines(%{checkpoint_node: source, checkpoint_offset_ms: offset} = saved) when source != node() do
+    shift = offset - (System.system_time(:millisecond) - System.monotonic_time(:millisecond))
+    remotes = Map.new(saved.connections, fn {player, pids} ->
+      {player, MapSet.filter(pids, &(node(&1) != source))}
+    end)
+    disconnects = Map.new(saved.disconnects, fn {id, deadline} -> {id, deadline + shift} end)
+    now = System.monotonic_time(:millisecond)
+    disconnects = Enum.reduce(remotes, disconnects, fn {player, pids}, acc ->
+      if MapSet.size(pids) == 0 and player in saved.players and saved.phase != :finished do
+        Map.put_new(acc, player, now + saved.reconnect_ms)
+      else
+        acc
+      end
+    end)
+    inputs = Enum.reduce(Map.keys(disconnects), saved.inputs, &Map.delete(&2, &1))
+
+    saved
+    |> Map.put(:connections, Map.reject(remotes, fn {_id, pids} -> MapSet.size(pids) == 0 end))
+    |> Map.put(:disconnects, disconnects)
+    |> Map.put(:inputs, inputs)
+    |> Map.update!(:timer_deadline, &shift_deadline(&1, shift))
+    |> Map.update!(:countdown_ends_at, &shift_deadline(&1, shift))
+  end
+
+  defp translate_deadlines(saved), do: saved
+  defp shift_deadline(nil, _shift), do: nil
+  defp shift_deadline(value, shift), do: value + shift
 
   defp attach_session(state, player, pid) do
     state = cancel_disconnect(state, player)

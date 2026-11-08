@@ -5,9 +5,9 @@ defmodule ArenaWeb.LoadtestController do
   def measurements(conn, _params) do
     {bytes, count} =
       Arena.MatchSupervisor
-      |> DynamicSupervisor.which_children()
+      |> Horde.DynamicSupervisor.which_children()
       |> Enum.reduce({0, 0}, fn
-        {_, pid, _, _}, {bytes, count} when is_pid(pid) ->
+        {_, pid, _, _}, {bytes, count} when is_pid(pid) and node(pid) == node() ->
           case Process.info(pid, :memory) do
             {:memory, size} -> {bytes + size, count + 1}
             nil -> {bytes, count}

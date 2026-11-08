@@ -1,0 +1,14 @@
+FROM hexpm/elixir:1.17.3-erlang-27.3.4.12-debian-bookworm-20260610-slim
+
+WORKDIR /app
+ENV MIX_ENV=prod HOME=/app/.build/home MIX_HOME=/app/.build/mix HEX_HOME=/app/.build/hex TMPDIR=/app/.build/tmp
+RUN mkdir -p "$HOME" "$MIX_HOME" "$HEX_HOME" "$TMPDIR" && mix local.hex --force && mix local.rebar --force
+COPY mix.exs .formatter.exs ./
+RUN mix deps.get --only prod
+COPY config ./config
+COPY lib ./lib
+COPY priv ./priv
+COPY assets ./assets
+RUN mix release
+
+CMD ["/app/_build/prod/rel/arena/bin/arena", "start"]

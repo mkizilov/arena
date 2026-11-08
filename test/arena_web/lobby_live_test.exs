@@ -15,8 +15,8 @@ defmodule ArenaWeb.LobbyLiveTest do
 
   defp cleanup_match(id) do
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)

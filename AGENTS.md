@@ -21,3 +21,4 @@ Extend this file with the project's language-specific architecture and verificat
 - Keep `Arena.Game` pure and deterministic: no processes, time calls, or randomness without explicit seed state. A match process owns scheduling and state; channel modules are transport only and contain no game logic.
 - Run `mix compile --warnings-as-errors`, `mix test`, `mix format --check-formatted`, `mix credo --strict`, and `mix dialyzer`, or run all five with `mix check`.
 - Definition of done for every future task: `mix check` passes, new code has tests, documentation is updated, provide a short summary, and make a conventional-commit Git commit.
+- Distributed cluster tests require a loopback-only distributed VM and project-scoped EPMD on port 22351, with distribution ports 22352–22359; see `DESIGN.md`. `LocalCluster.start/0` starts an unrestricted boot server on other ports, so do not call it under these boundaries.

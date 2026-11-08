@@ -17,8 +17,8 @@ defmodule ArenaWeb.LobbyChannelTest do
 
     assert_push "match_found", %{match_id: id}, 2_000
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{pid, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Arena.Match.stop(id)
         [] -> :ok
       end
     end)

@@ -15,3 +15,4 @@ config :arena, ArenaWeb.Endpoint,
   server: false
 
 config :logger, level: :warning
+config :arena, :cluster_strategy, :none

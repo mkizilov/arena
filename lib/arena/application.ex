@@ -6,10 +6,13 @@ defmodule Arena.Application do
   def start(_type, _args) do
     children = [
       Arena.PromEx,
+      {Cluster.Supervisor, [Arena.Cluster.topologies(), [name: Arena.ClusterSupervisor]]},
       {Phoenix.PubSub, name: Arena.PubSub},
-      {Registry, keys: :unique, name: Arena.MatchRegistry},
+      {Horde.Registry, name: Arena.MatchRegistry, keys: :unique, members: :auto},
+      Arena.MatchReplica,
       Arena.MatchStore,
-      {DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor, max_restarts: 1_000, max_seconds: 5},
+      {Horde.DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor,
+        members: :auto, process_redistribution: :passive, max_restarts: 1_000, max_seconds: 5},
       Arena.Observability,
       Arena.Lobby,
       Arena.Matchmaker,

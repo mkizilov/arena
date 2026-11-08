@@ -10,8 +10,8 @@ defmodule Arena.CrashIsolationTest do
       Matchmaker.start_match(id, Keyword.merge([seed: {1, 2, 3}, countdown_ms: 0], opts))
 
     on_exit(fn ->
-      case Registry.lookup(Arena.MatchRegistry, id) do
-        [{current, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, current)
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
@@ -67,7 +67,7 @@ defmodule Arena.CrashIsolationTest do
     assert failed_id in Lobby.matches()
     assert live_id in Lobby.matches()
     assert Process.alive?(live_pid)
-    assert [{^recovered_pid, _}] = Registry.lookup(Arena.MatchRegistry, failed_id)
+    assert [{^recovered_pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, failed_id)
     assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "delta", payload: %{tick: tick}} when tick > first_tick, 1_000
   end
 
