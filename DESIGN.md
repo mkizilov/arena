@@ -1,6 +1,6 @@
 # Arena design
 
-The pure game core is implemented; match processes and channel events are planned.
+The pure game core and match process are implemented; channel events are planned.
 
 ## Rules
 
@@ -8,7 +8,7 @@ Each match runs on a 40 × 30 grid with up to eight snakes. The server advances 
 
 ## Architecture
 
-`Arena.Game` is a pure, deterministic state-transition core. Its inputs include the current state, player commands, and explicit random seed state; it performs no process operations, clock reads, or implicit random calls. A single `Arena.Match` GenServer per match will own the game state, gather commands and schedule ticks. Phoenix Channels validate and translate transport messages, forward commands to the match, and relay server snapshots; they contain no game rules. The server is authoritative: clients never submit positions, scores, or outcomes as truth.
+`Arena.Game` is a pure, deterministic state-transition core. Its inputs include the current state, player commands, and explicit random seed state; it performs no process operations, clock reads, or implicit random calls. A single `Arena.Match` GenServer per match owns the game state, gathers commands and schedules ticks. Phoenix Channels will validate and translate transport messages, forward commands to the match, and relay server snapshots; they contain no game rules. The server is authoritative: clients never submit positions, scores, or outcomes as truth.
 
 ### Core contract
 
@@ -18,14 +18,22 @@ All live snakes propose their moves simultaneously. A non-growing snake's tail v
 
 If all snakes die on the same tick, the result has no winners and reason `:simultaneous_death`; otherwise a sole survivor wins immediately. On tick 2,700, if multiple snakes remain, the highest score among all participants wins, with all tied players included. Elimination takes precedence over the time limit. A finished game does not advance or emit further events.
 
-Planned supervision tree (only Repo, PubSub and Endpoint exist initially):
+### Match lifecycle and API
+
+`Arena.Match.start_match(id, opts)` starts a temporary child under `Arena.MatchSupervisor` registered by nonempty string ID in `Arena.MatchRegistry`. `join(id, player)` admits at most eight unique players; the second starts a three-second countdown, during which others may join. If fewer than two remain, the countdown is cancelled and the match returns to waiting. A waiting match is stopped after 60 seconds without a join or leave. Players cannot join once running. A running player who leaves forfeits: their snake is marked dead immediately and a `:died` event is emitted at the next tick; the normal game rules then determine the result. A finished match is stopped after a ten-second grace period. Matches are temporary children and are not restarted after termination.
+
+`input(id, player, direction)` accepts a valid direction from a joined living player while running, retaining only the latest input until the next tick. `snapshot(id)` returns the current phase, ordered players and game state. A match runs at 15 ticks per second against deadlines derived from a monotonic epoch; if delayed, it catches up without skipping simulation ticks. `manual: true` disables automatic running ticks and allows `tick(id)` to advance exactly one tick. Options `:seed`, `:countdown_ms`, `:idle_ms`, and `:grace_ms` allow deterministic and bounded tests; a seed is generated at match creation if omitted. Countdown, idle and shutdown timers remain active in manual mode.
+
+Subscribers to `Arena.Match.topic(id)` on `Arena.PubSub` receive `{:match_status, id, phase, players}` on membership or phase changes and `{:match_tick, id, game, events}` after each tick, including the final tick. The published game is the Elixir core state, not a wire-format payload. The future channel is responsible for serialization, authentication and authorization. Calls for an unknown or already stopped match exit as normal `GenServer.call` failures; callers should handle that boundary.
+
+Supervision tree:
 
 ```text
 Arena.Supervisor (one_for_one)
 ├── Arena.Repo
 ├── Phoenix.PubSub (Arena.PubSub)
-├── Registry (match IDs)
-├── DynamicSupervisor (one Arena.Match per active match)
+├── Arena.MatchRegistry (unique match IDs)
+├── Arena.MatchSupervisor (one Arena.Match per active match)
 │   └── Arena.Match
 └── ArenaWeb.Endpoint (channels)
 ```
