@@ -2,7 +2,7 @@ defmodule ArenaWeb.AssetController do
   @moduledoc false
   use Phoenix.Controller
 
-  for file <- ~w(app.mjs hook.mjs render.mjs) do
+  for file <- ~w(app.mjs hook.mjs render.mjs delta.mjs) do
     path = Path.expand("../../assets/js/game/#{file}", __DIR__)
     @external_resource path
     defp game_source(unquote(file)), do: unquote(File.read!(path))

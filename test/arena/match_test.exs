@@ -60,11 +60,13 @@ defmodule Arena.MatchTest do
     assert :ok = Match.input(id, :a, :down)
     assert :ok = Match.input(id, :a, :up)
     assert :ok = Match.tick(id)
-    assert_receive {:match_tick, ^id, game, _}
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "state", payload: %{state: %{tick: 1}}}
+    game = Match.snapshot(id).game
     assert game.tick == 1
     assert {:value, {5, 3}} = :queue.peek(game.snakes.a.body)
     assert :ok = Match.tick(id)
-    assert_receive {:match_tick, ^id, game, _}
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "delta", payload: %{tick: 2}}
+    game = Match.snapshot(id).game
     assert game.tick == 2
     assert {:value, {5, 2}} = :queue.peek(game.snakes.a.body)
   end
@@ -75,9 +77,10 @@ defmodule Arena.MatchTest do
     assert :ok = Match.leave(id, :a)
     assert {:error, :not_joined} = Match.input(id, :a, :up)
     assert :ok = Match.tick(id)
-    assert_receive {:match_tick, ^id, game, events}
-    assert {:died, :a} in events
-    assert {:match_over, %{reason: :last_alive, winners: [:b]}} in events
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, payload: %{events: events}}
+    game = Match.snapshot(id).game
+    assert %{type: :died, player: :a} in events
+    assert %{type: :match_over, result: %{reason: :last_alive, winners: [:b]}} in events
     assert game.result.winners == [:b]
     assert_receive {:match_status, ^id, :finished, [:b]}
     assert {:error, :not_manual_running} = Match.tick(id)
@@ -89,10 +92,11 @@ defmodule Arena.MatchTest do
 
     Enum.reduce_while(1..40, nil, fn _, _ ->
       assert :ok = Match.tick(id)
-      assert_receive {:match_tick, ^id, game, events}
+      assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, payload: %{events: events}}
+      game = Match.snapshot(id).game
 
       if game.result do
-        assert {:match_over, game.result} in events
+        assert %{type: :match_over, result: game.result} in events
         {:halt, game.result}
       else
         {:cont, nil}
@@ -106,7 +110,7 @@ defmodule Arena.MatchTest do
   test "automatic mode schedules and broadcasts ticks without manual intervention" do
     {id, _pid} = start_running(manual: false)
     assert {:error, :not_manual_running} = Match.tick(id)
-    assert_receive {:match_tick, ^id, %{tick: 1}, _}, 1_000
-    assert_receive {:match_tick, ^id, %{tick: 2}, _}, 1_000
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "state", payload: %{state: %{tick: 1}}}, 1_000
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "delta", payload: %{tick: 2}}, 1_000
   end
 end

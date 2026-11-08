@@ -61,6 +61,7 @@ defmodule Arena.Match do
       players: players,
       visibility: Keyword.get(opts, :visibility, :public),
       game: nil,
+      published_game: nil,
       inputs: %{},
       forfeits: [],
       seed: seed,
@@ -163,7 +164,13 @@ defmodule Arena.Match do
 
       :countdown ->
         game = Game.new(state.players, state.seed)
-        state = %{state | game: game, epoch: System.monotonic_time(:millisecond), scheduled_tick: 0}
+        state = %{
+          state
+          | game: game,
+            published_game: game,
+            epoch: System.monotonic_time(:millisecond),
+            scheduled_tick: 0
+        }
         state = set_phase(state, :running)
         broadcast_status(state)
         {:noreply, schedule_tick(state)}
@@ -200,8 +207,8 @@ defmodule Arena.Match do
   defp advance(state) do
     {game, events} = Game.tick(state.game, state.inputs)
     events = state.forfeits ++ events
-    state = %{state | game: game, inputs: %{}, forfeits: []}
-    Phoenix.PubSub.broadcast(Arena.PubSub, topic(state.id), {:match_tick, state.id, game, events})
+    Arena.GameUpdates.publish(state.id, state.published_game, game, events)
+    state = %{state | game: game, published_game: game, inputs: %{}, forfeits: []}
 
     if game.result do
       state = state |> set_phase(:finished) |> arm(:shutdown, state.grace_ms)

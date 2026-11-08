@@ -69,6 +69,12 @@ defmodule ArenaWeb.MatchChannelTest do
     assert hd(snakes[guest.id].body) == [5, 3]
     assert {:ok, _json} = Jason.encode(%{snakes: snakes, events: events})
 
+    assert :ok = Match.tick(id)
+    assert_push "delta", %{tick: 2, moves: moves}
+    assert moves[guest.id].head == [5, 2]
+    ref = push(channel, "resync", %{})
+    assert_reply ref, :ok, %{state: %{tick: 2}}
+
     ref = push(channel, "input", %{"direction" => "north"})
     assert_reply ref, :error, %{reason: "invalid_direction"}
 

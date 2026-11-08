@@ -48,7 +48,7 @@ defmodule Arena.CrashIsolationTest do
     player_subscriber(failed_id, :b)
     assert failed_id in Lobby.matches()
     assert live_id in Lobby.matches()
-    assert_receive {:match_tick, ^live_id, %{tick: first_tick}, _}, 1_000
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "state", payload: %{state: %{tick: first_tick}}}, 1_000
 
     ref = Process.monitor(failed_pid)
     Process.exit(failed_pid, :kill)
@@ -60,7 +60,7 @@ defmodule Arena.CrashIsolationTest do
     assert live_id in Lobby.matches()
     assert Process.alive?(live_pid)
     assert Registry.lookup(Arena.MatchRegistry, failed_id) == []
-    assert_receive {:match_tick, ^live_id, %{tick: tick}, _} when tick > first_tick, 1_000
+    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "delta", payload: %{tick: tick}} when tick > first_tick, 1_000
   end
 
   test "normal shutdown removes a match without reporting a crash" do

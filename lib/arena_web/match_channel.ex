@@ -31,6 +31,13 @@ defmodule ArenaWeb.MatchChannel do
   @impl true
   def handle_in("ping", _payload, socket), do: {:reply, :ok, socket}
 
+  def handle_in("resync", _payload, socket) do
+    case match_call(fn -> Match.snapshot(socket.assigns.match_id) end) do
+      {:ok, snapshot} -> {:reply, {:ok, %{state: GameJSON.render(snapshot.game)}}, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
   def handle_in("input", %{"direction" => direction}, socket) do
     case Map.fetch(@directions, direction) do
       {:ok, direction} ->
@@ -70,11 +77,6 @@ defmodule ArenaWeb.MatchChannel do
         push(socket, "match_ended", %{reason: "unavailable"})
     end
 
-    {:noreply, socket}
-  end
-
-  def handle_info({:match_tick, id, game, events}, %{assigns: %{match_id: id}} = socket) do
-    push(socket, "state", %{state: GameJSON.render(game), events: GameJSON.events(events)})
     {:noreply, socket}
   end
 

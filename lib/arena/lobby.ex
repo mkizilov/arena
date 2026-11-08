@@ -85,7 +85,8 @@ defmodule Arena.Lobby do
     {:noreply, matches}
   end
 
-  def handle_info({:match_tick, _id, _game, _events}, matches), do: {:noreply, matches}
+  def handle_info(%Phoenix.Socket.Broadcast{event: event}, matches) when event in ["delta", "state"],
+    do: {:noreply, matches}
   def handle_info({:match_ended_unexpectedly, _id}, matches), do: {:noreply, matches}
 
   def handle_info({:DOWN, ref, :process, pid, reason}, matches) do

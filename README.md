@@ -12,6 +12,8 @@ Visit `http://127.0.0.1:22300/lobby` for quick play, private rooms, and the open
 
 Game modules live in `assets/js/game/` and are embedded into the application at compile time; edits trigger recompilation. The browser receives Phoenix and LiveView's prebuilt ES modules from their installed dependencies, so no Node package installation or separate asset build is required. `floki` is a test-only dependency for LiveView tests.
 
+Match updates use deltas with periodic full snapshots and gap recovery; the reproducible synthetic bandwidth comparison is in [DESIGN.md](DESIGN.md).
+
 Production requires `DATABASE_URL` and `SECRET_KEY_BASE`; set `PHX_SERVER` to start the HTTP endpoint and `PHX_HOST` to its public hostname. TLS termination is expected upstream.
 
 ## Scaffold provenance

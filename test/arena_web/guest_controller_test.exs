@@ -39,6 +39,7 @@ defmodule ArenaWeb.GuestControllerTest do
           "/assets/game/app.mjs",
           "/assets/game/hook.mjs",
           "/assets/game/render.mjs",
+          "/assets/game/delta.mjs",
           "/assets/vendor/phoenix.mjs",
           "/assets/vendor/phoenix_live_view.esm.js"
         ] do

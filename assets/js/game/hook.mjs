@@ -1,4 +1,5 @@
 import { TICK_MS, directionForKey, drawBoard } from "./render.mjs";
+import { applyDelta } from "./delta.mjs";
 
 export function createGameHook(Socket) {
   return {
@@ -37,6 +38,7 @@ export function createGameHook(Socket) {
     this.channel = this.socket.channel(`match:${this.el.dataset.matchId}`, {});
     this.channel.on("status", (status) => this.setStatus(status));
     this.channel.on("state", ({ state }) => this.setState(state));
+    this.channel.on("delta", (delta) => this.receiveDelta(delta));
     this.channel.on("match_ended", ({ reason }) => {
       this.phase = "ended";
       this.status.textContent = `Match ended: ${reason}`;
@@ -77,6 +79,7 @@ export function createGameHook(Socket) {
 
   setState(state) {
     if (!state || (this.current && state.tick <= this.current.tick)) return;
+    this.resyncing = false;
     this.previous = this.current && state.tick === this.current.tick + 1 ? this.current : null;
     this.current = state;
     this.receivedAt = performance.now();
@@ -89,6 +92,23 @@ export function createGameHook(Socket) {
     if (state.result) {
       const winners = state.result.winners.length ? state.result.winners.join(", ") : "No winner";
       this.result.textContent = `Result: ${winners} (${state.result.reason})`;
+    }
+  },
+
+  receiveDelta(delta) {
+    if (this.current && delta.tick <= this.current.tick) return;
+    const next = applyDelta(this.current, delta);
+    if (next) {
+      this.setState(next);
+    } else if (!this.resyncing) {
+      this.resyncing = true;
+      this.channel.push("resync", {})
+        .receive("ok", ({ state }) => {
+          this.resyncing = false;
+          this.setState(state);
+        })
+        .receive("error", () => { this.resyncing = false; })
+        .receive("timeout", () => { this.resyncing = false; });
     }
   },
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { interpolateBody, directionForKey, drawBoard } from "../../assets/js/game/render.mjs";
 import { createGameHook } from "../../assets/js/game/hook.mjs";
+import { applyDelta } from "../../assets/js/game/delta.mjs";
 
 test("interpolates moving and growing segments and clamps the fraction", () => {
   const old = [[1, 1], [0, 1]];
@@ -30,6 +31,34 @@ test("draws food and interpolated live snake cells on the canvas", () => {
   assert.equal(rectangles.length, 3);
   assert.deepEqual(rectangles[1].slice(1), [40, 50, 10, 10]);
   assert.deepEqual(rectangles[2].slice(1), [15, 10, 9, 9]);
+});
+
+test("applies movement, growth, deaths, food, scores and result without mutating the snapshot", () => {
+  const previous = {
+    tick: 1, width: 40, height: 30, food: [2, 1], result: null,
+    snakes: {
+      a: { body: [[1, 1], [0, 1]], direction: "right", alive: true, score: 0 },
+      b: { body: [[7, 5], [8, 5]], direction: "left", alive: true, score: 0 },
+    },
+  };
+  const delta = {
+    tick: 2, moves: {
+      a: { head: [2, 1], tail_moved: false, direction: "right" },
+      b: { head: [6, 5], tail_moved: true, direction: "left" },
+    }, deaths: ["b"], scores: { a: 1 }, food_removed: [2, 1], food_added: [9, 9],
+    result: { winners: ["a"], reason: "last_alive" }, events: [],
+  };
+  const next = applyDelta(previous, delta);
+  assert.deepEqual(next.snakes.a.body, [[2, 1], [1, 1], [0, 1]]);
+  assert.deepEqual(next.snakes.b.body, [[6, 5], [7, 5]]);
+  assert.equal(next.snakes.b.alive, false);
+  assert.equal(next.snakes.a.score, 1);
+  assert.deepEqual(next.food, [9, 9]);
+  assert.equal(next.result.reason, "last_alive");
+  assert.deepEqual(previous.snakes.a.body, [[1, 1], [0, 1]]);
+  assert.equal(previous.snakes.b.alive, true);
+  assert.equal(applyDelta(previous, { ...delta, tick: 3 }), null);
+  assert.equal(applyDelta(null, delta), null);
 });
 
 test("hook joins, sends controls and ping, updates scores, countdown and result, then cleans up", (t) => {
@@ -61,6 +90,7 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   globalThis.clearInterval = () => {};
 
   const sent = [];
+  const resync = {};
   const handlers = {};
   const reply = { phase: "running", state: null };
   const channel = {
@@ -69,6 +99,9 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
     join: () => ({ receive(status, fn) { if (status === "ok") fn(reply); return this; } }),
     push: (name, payload) => {
       sent.push([name, payload]);
+      if (name === "resync") {
+        return { receive(status, fn) { resync[status] = fn; return this; } };
+      }
       return { receive(status, fn) { if (status === "ok") fn({}); return this; } };
     },
     leave() { this.left = true; },
@@ -92,10 +125,19 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   assert.equal(scores.rows[0].textContent, "a: 2");
   handlers.state({ state: { tick: 1, snakes: {}, result: null } });
   assert.equal(scores.rows[0].textContent, "a: 2");
+  handlers.delta({ tick: 2, moves: { a: { head: [2, 1], tail_moved: true, direction: "right" } }, deaths: [], scores: {}, events: [] });
+  assert.equal(hook.current.tick, 2);
+  assert.equal(hook.previous.tick, 1);
+  handlers.delta({ tick: 4, moves: {}, deaths: [], scores: {}, events: [] });
+  handlers.delta({ tick: 5, moves: {}, deaths: [], scores: {}, events: [] });
+  assert.equal(sent.filter(([name]) => name === "resync").length, 1);
+  resync.ok({ state: { tick: 5, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: null } });
+  assert.equal(hook.current.tick, 5);
+  assert.equal(hook.previous, null);
   handlers.status({ phase: "countdown", countdown_ms: 3000 });
   frame(performance.now());
   assert.match(status.textContent, /Starting in [123]/);
-  handlers.state({ state: { tick: 2, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: { winners: ["a"], reason: "last_alive" } } });
+  handlers.state({ state: { tick: 6, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: { winners: ["a"], reason: "last_alive" } } });
   assert.match(result.textContent, /a \(last_alive\)/);
   hook.destroyed();
   assert.equal(removed, true);
