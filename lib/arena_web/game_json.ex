@@ -21,6 +21,7 @@ defmodule ArenaWeb.GameJSON do
       height: game.height,
       snakes: snakes,
       food: cell(game.food),
+      power_up: cell(Map.get(game, :power_up)),
       result: game.result
     }
   end
@@ -63,12 +64,21 @@ defmodule ArenaWeb.GameJSON do
         delta
       end
 
+    delta =
+      if Map.get(previous, :power_up) != Map.get(current, :power_up) do
+        Map.merge(delta, %{power_up_removed: cell(Map.get(previous, :power_up)), power_up_added: cell(Map.get(current, :power_up))})
+      else
+        delta
+      end
+
     if previous.result != current.result, do: Map.put(delta, :result, current.result), else: delta
   end
 
   defp event({:ate, id, position}), do: %{type: :ate, player: id, cell: cell(position)}
   defp event({:died, id}), do: %{type: :died, player: id}
   defp event({:food_spawned, position}), do: %{type: :food_spawned, cell: cell(position)}
+  defp event({:power_up_collected, id, position}), do: %{type: :power_up_collected, player: id, cell: cell(position)}
+  defp event({:power_up_spawned, position}), do: %{type: :power_up_spawned, cell: cell(position)}
   defp event({:match_over, result}), do: %{type: :match_over, result: result}
 
   defp cell(nil), do: nil

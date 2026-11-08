@@ -10,7 +10,7 @@ defmodule Arena.GameTest do
   end
 
   defp game(snakes, food \\ {20, 20}) do
-    %{Game.new([:a, :b], {1, 2, 3}) | snakes: Map.new(snakes), food: food}
+    %{Game.new([:a, :b], {1, 2, 3}) | snakes: Map.new(snakes), food: food, power_up: {30, 29}}
   end
 
   defp cells(snake), do: :queue.to_list(snake.body)
@@ -21,6 +21,8 @@ defmodule Arena.GameTest do
     assert {state.width, state.height} == {40, 30}
     assert map_size(state.snakes) == 8
     refute state.food in Enum.flat_map(state.snakes, fn {_, s} -> cells(s) end)
+    refute state.power_up in Enum.flat_map(state.snakes, fn {_, s} -> cells(s) end)
+    assert state.power_up != state.food
     assert_raise ArgumentError, fn -> Game.new([:a], {1, 2, 3}) end
     assert_raise ArgumentError, fn -> Game.new([:a, :a], {1, 2, 3}) end
     assert_raise ArgumentError, fn -> Game.new(Enum.to_list(1..9), {1, 2, 3}) end
@@ -43,6 +45,7 @@ defmodule Arena.GameTest do
     assert next.snakes.a.score == 1
     assert cells(next.snakes.a) == [{6, 5}, {5, 5}, {4, 5}]
     refute next.food in Enum.flat_map(next.snakes, fn {_, s} -> cells(s) end)
+    assert next.food != next.power_up
   end
 
   test "walls and bodies kill and end the match" do
@@ -91,6 +94,44 @@ defmodule Arena.GameTest do
     refute Enum.any?(events, fn event -> elem(event, 0) == :ate end)
   end
 
+  test "collecting a power-up gives five points without growth and respawns on a free cell" do
+    state = game(a: snake([{5, 5}, {4, 5}], :right), b: snake([{20, 5}], :right))
+    state = %{state | power_up: {6, 5}}
+    {next, events} = Game.tick(state, %{})
+    assert {:power_up_collected, :a, {6, 5}} in events
+    assert {:power_up_spawned, next.power_up} in events
+    assert next.snakes.a.score == 5
+    assert length(cells(next.snakes.a)) == 2
+    refute next.power_up == next.food
+    refute next.power_up in Enum.flat_map(next.snakes, fn {_, snake} -> cells(snake) end)
+  end
+
+  test "a fatal collision on a power-up does not collect it" do
+    state = game(a: snake([{5, 5}], :right), b: snake([{7, 5}], :left))
+    state = %{state | power_up: {6, 5}}
+    {next, events} = Game.tick(state, %{})
+    assert next.power_up == {6, 5}
+    assert next.snakes.a.score == 0
+    assert next.snakes.b.score == 0
+    refute Enum.any?(events, fn event -> elem(event, 0) == :power_up_collected end)
+  end
+
+  test "food and power-up consumed on the same tick respawn in distinct free cells" do
+    state = game([a: snake([{5, 5}, {4, 5}], :right), b: snake([{20, 5}, {19, 5}], :right)], {6, 5})
+    state = %{state | power_up: {21, 5}}
+    {next, events} = Game.tick(state, %{})
+    assert {:ate, :a, {6, 5}} in events
+    assert {:power_up_collected, :b, {21, 5}} in events
+    assert next.snakes.a.score == 1
+    assert next.snakes.b.score == 5
+    assert length(cells(next.snakes.a)) == 3
+    assert length(cells(next.snakes.b)) == 2
+    assert next.food != next.power_up
+    occupied = Enum.flat_map(next.snakes, fn {_, snake} -> cells(snake) end)
+    refute next.food in occupied
+    refute next.power_up in occupied
+  end
+
   test "after 2700 ticks the highest scores win, including ties" do
     state = game(a: snake([{5, 5}], :right, 2), b: snake([{20, 5}], :right, 2))
     {next, events} = Game.tick(%{state | tick: 2699}, %{})
@@ -104,7 +145,7 @@ defmodule Arena.GameTest do
   test "no food is spawned when the board is full" do
     dead = %{snake([{1, 1}], :right) | alive: false}
     state = game([a: snake([{0, 0}, {0, 1}, {1, 1}], :right), b: dead], {1, 0})
-    state = %{state | width: 2, height: 2}
+    state = %{state | width: 2, height: 2, power_up: nil}
     {next, events} = Game.tick(state, %{})
     assert {:ate, :a, {1, 0}} in events
     assert next.food == nil
@@ -118,10 +159,16 @@ defmodule Arena.GameTest do
               inputs <- list_of(fixed_map(%{a: direction, b: direction, c: direction}), max_length: 100) do
       initial = Game.new([:a, :b, :c], seed)
 
-      {final, _} =
-        Enum.reduce(inputs, {initial, initial}, fn input, {state, replay} ->
+      {final, _, _} =
+        Enum.reduce(inputs, {initial, initial, %{}}, fn input, {state, replay, counts} ->
           {next, events} = Game.tick(state, input)
           assert {next, events} == Game.tick(replay, input)
+
+          counts = Enum.reduce(events, counts, fn
+            {:ate, id, _}, acc -> Map.update(acc, id, {1, 0}, fn {food, powers} -> {food + 1, powers} end)
+            {:power_up_collected, id, _}, acc -> Map.update(acc, id, {0, 1}, fn {food, powers} -> {food, powers + 1} end)
+            _, acc -> acc
+          end)
 
           live_cells =
             next.snakes
@@ -131,11 +178,13 @@ defmodule Arena.GameTest do
           assert length(live_cells) == MapSet.size(MapSet.new(live_cells))
 
           for {id, snake} <- next.snakes do
-            assert length(cells(snake)) == 3 + snake.score
+            {food, powers} = Map.get(counts, id, {0, 0})
+            assert length(cells(snake)) == 3 + food
+            assert snake.score == food + 5 * powers
             assert snake.score >= state.snakes[id].score
           end
 
-          {next, next}
+          {next, next, counts}
         end)
 
       assert final == Enum.reduce(inputs, initial, fn input, state -> elem(Game.tick(state, input), 0) end)

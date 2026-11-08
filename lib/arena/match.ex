@@ -62,11 +62,16 @@ defmodule Arena.Match do
 
     case Arena.MatchStore.get(id, Keyword.fetch!(opts, :instance_id)) do
       {:ok, saved} ->
-        state = restore(saved)
-        checkpoint(state)
-        observe(state)
-        send(self(), :announce_recovery)
-        {:ok, state}
+        case Arena.MatchState.upgrade(saved) do
+          {:ok, migrated} ->
+            state = restore(migrated)
+            checkpoint(state)
+            observe(state)
+            send(self(), :announce_recovery)
+            {:ok, state}
+
+          {:error, reason} -> {:stop, reason}
+        end
 
       :new ->
         state = new_state(id, opts)
@@ -98,6 +103,7 @@ defmodule Arena.Match do
 
     state = %{
       id: id,
+      version: Arena.MatchState.current_version(),
       result_id: Keyword.fetch!(opts, :instance_id),
       phase: phase,
       players: players,
@@ -349,6 +355,10 @@ defmodule Arena.Match do
         {:noreply, state}
     end
   end
+
+  @impl true
+  def code_change({:down, _version}, _state, _extra), do: {:error, :unsupported_downgrade}
+  def code_change(_old_version, state, _extra), do: Arena.MatchState.upgrade(state)
 
   @impl true
   def terminate(reason, state) do

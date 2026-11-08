@@ -31,6 +31,7 @@ defmodule Arena.GameUpdatesTest do
       | tick: delta.tick,
         snakes: snakes,
         food: Map.get(delta, :food_added, snapshot.food),
+        power_up: Map.get(delta, :power_up_added, snapshot.power_up),
         result: Map.get(delta, :result, snapshot.result)
     }
   end
@@ -58,7 +59,7 @@ defmodule Arena.GameUpdatesTest do
 
   test "deltas preserve food, growth, death, scores, results and forfeits" do
     initial = Game.new([:a, :b, :c], {1, 2, 3})
-    initial = %{initial | food: {6, 4}}
+    initial = %{initial | food: {6, 4}, power_up: {30, 29}}
     {eaten, events} = Game.tick(initial, %{})
     delta = GameJSON.delta(initial, eaten, events)
     assert delta.food_removed == [6, 4]
@@ -73,6 +74,17 @@ defmodule Arena.GameUpdatesTest do
     assert "a" in delta.deaths
     refute Map.has_key?(delta.moves, "a")
     assert apply_delta(GameJSON.render(eaten), delta) == GameJSON.render(next)
+  end
+
+  test "power-up movement is represented in snapshots and deltas" do
+    initial = Game.new([:a, :b], {1, 2, 3})
+    initial = %{initial | power_up: {6, 4}, food: {25, 20}}
+    {next, events} = Game.tick(initial, %{})
+    delta = GameJSON.delta(initial, next, events)
+    assert delta.power_up_removed == [6, 4]
+    assert delta.power_up_added == GameJSON.render(next).power_up
+    assert %{type: :power_up_collected, player: :a, cell: [6, 4]} in delta.events
+    assert apply_delta(GameJSON.render(initial), delta) == GameJSON.render(next)
   end
 
   test "a fatal move preserves the final body and result" do

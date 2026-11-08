@@ -16,7 +16,7 @@ defmodule ArenaWeb.MatchLive do
         <p data-status aria-live="polite">Connecting…</p>
         <p>Latency: <span data-latency>—</span></p>
         <canvas data-canvas width="800" height="600" aria-label="Snake game board"></canvas>
-        <p>Move using arrow keys or WASD.</p>
+        <p>Move using arrow keys or WASD. Purple power-ups give five points without growth.</p>
         <h2>Scores</h2>
         <ul data-scores></ul>
         <p data-result role="status"></p>

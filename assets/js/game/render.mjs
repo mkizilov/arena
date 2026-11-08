@@ -38,6 +38,11 @@ export function drawBoard(ctx, current, previous, alpha) {
     ctx.fillRect(current.food[0] * cellWidth, current.food[1] * cellHeight, cellWidth, cellHeight);
   }
 
+  if (current.power_up) {
+    ctx.fillStyle = "#c084fc";
+    ctx.fillRect(current.power_up[0] * cellWidth, current.power_up[1] * cellHeight, cellWidth, cellHeight);
+  }
+
   for (const [id, snake] of Object.entries(current.snakes)) {
     if (!snake.alive) continue;
     const prior = previous?.snakes[id]?.body || snake.body;

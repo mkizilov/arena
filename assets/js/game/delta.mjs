@@ -23,6 +23,7 @@ export function applyDelta(state, delta) {
     tick: delta.tick,
     snakes,
     food: Object.hasOwn(delta, "food_added") ? delta.food_added : state.food,
+    power_up: Object.hasOwn(delta, "power_up_added") ? delta.power_up_added : (state.power_up ?? null),
     result: Object.hasOwn(delta, "result") ? delta.result : state.result,
   };
 }

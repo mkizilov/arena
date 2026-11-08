@@ -33,9 +33,16 @@ test("draws food and interpolated live snake cells on the canvas", () => {
   assert.deepEqual(rectangles[2].slice(1), [15, 10, 9, 9]);
 });
 
+test("draws a power-up as a distinct cell", () => {
+  const rectangles = [];
+  const ctx = { canvas: { width: 400, height: 300 }, fillRect(...args) { rectangles.push([this.fillStyle, ...args]); } };
+  drawBoard(ctx, { width: 40, height: 30, food: null, power_up: [3, 4], snakes: {} }, null, 1);
+  assert.deepEqual(rectangles[1], ["#c084fc", 30, 40, 10, 10]);
+});
+
 test("applies movement, growth, deaths, food, scores and result without mutating the snapshot", () => {
   const previous = {
-    tick: 1, width: 40, height: 30, food: [2, 1], result: null,
+    tick: 1, width: 40, height: 30, food: [2, 1], power_up: [4, 4], result: null,
     snakes: {
       a: { body: [[1, 1], [0, 1]], direction: "right", alive: true, score: 0 },
       b: { body: [[7, 5], [8, 5]], direction: "left", alive: true, score: 0 },
@@ -45,7 +52,7 @@ test("applies movement, growth, deaths, food, scores and result without mutating
     tick: 2, moves: {
       a: { head: [2, 1], tail_moved: false, direction: "right" },
       b: { head: [6, 5], tail_moved: true, direction: "left" },
-    }, deaths: ["b"], scores: { a: 1 }, food_removed: [2, 1], food_added: [9, 9],
+    }, deaths: ["b"], scores: { a: 1 }, food_removed: [2, 1], food_added: [9, 9], power_up_removed: [4, 4], power_up_added: [7, 8],
     result: { winners: ["a"], reason: "last_alive" }, events: [],
   };
   const next = applyDelta(previous, delta);
@@ -54,6 +61,7 @@ test("applies movement, growth, deaths, food, scores and result without mutating
   assert.equal(next.snakes.b.alive, false);
   assert.equal(next.snakes.a.score, 1);
   assert.deepEqual(next.food, [9, 9]);
+  assert.deepEqual(next.power_up, [7, 8]);
   assert.equal(next.result.reason, "last_alive");
   assert.deepEqual(previous.snakes.a.body, [[1, 1], [0, 1]]);
   assert.equal(previous.snakes.b.alive, true);

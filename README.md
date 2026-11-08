@@ -22,6 +22,8 @@ Match updates use deltas with periodic full snapshots and gap recovery; the repr
 
 Match processes checkpoint to ETS and replicate checkpoints to another connected node when available; Horde places and recovers them across the cluster. Disconnected players have a ten-second reconnection grace period. Cluster setup, the checkpoint limitations, and test prerequisites are documented in [DESIGN.md](DESIGN.md).
 
+Match state has explicit upgrade versions; the power-up rule, manual remote-console demonstration, and its limitations are documented in [UPGRADES.md](UPGRADES.md).
+
 Production requires `DATABASE_URL` and `SECRET_KEY_BASE`; set `PHX_SERVER` to start the HTTP endpoint and `PHX_HOST` to its public hostname. TLS termination is expected upstream.
 
 ## Scaffold provenance
