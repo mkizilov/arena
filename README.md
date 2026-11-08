@@ -43,6 +43,8 @@ The core simulation has no processes, clock calls, or implicit randomness. Chann
 
 Install the versions in `.tool-versions` and dependencies **inside this repository**, then run `mix local.hex`, `mix deps.get --locked`, `mix ecto.setup`, and `mix phx.server`. PostgreSQL is configured at `127.0.0.1:22301`; `docker-compose.yml` describes a project-local database for environments where Docker is explicitly authorized. This sandbox must not use the host Docker socket. The app listens on `http://127.0.0.1:22300`; open `/lobby`, use quick play or a private room, and play with arrow keys or WASD. `/leaderboard` shows completed-match statistics.
 
+For a disposable native PostgreSQL test instance in a restrictive sandbox, keep `postgres` in a foreground process owned by the test runner rather than daemonizing it with `pg_ctl start`; stop that owned process before removing its project-local socket, data and log files. A detached server may be outside a later shell's permitted signal scope. If stopping it is denied, leave its live files intact and report its PID, port and paths to an authorized controller. Verify the listener itself is gone rather than relying solely on `pg_ctl status`, which can also be affected by signal restrictions.
+
 `/healthz` is process liveness and does not query dependencies. `/readyz` returns 200 only when PostgreSQL responds and both Horde membership views contain at least `ARENA_CLUSTER_EXPECTED_NODES` connected nodes, including the current node; otherwise it returns 503 with boolean checks. Readiness is not proof of replica durability or partition safety.
 
 ## Production release and Compose cluster
