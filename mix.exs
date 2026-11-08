@@ -16,7 +16,7 @@ defmodule Arena.MixProject do
   end
 
   def application do
-    [mod: {Arena.Application, []}, extra_applications: [:logger, :runtime_tools]]
+    [mod: {Arena.Application, []}, extra_applications: [:crypto, :logger, :runtime_tools]]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]

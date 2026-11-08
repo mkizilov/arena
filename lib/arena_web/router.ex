@@ -9,5 +9,10 @@ defmodule ArenaWeb.Router do
   scope "/", ArenaWeb do
     pipe_through :api
     get "/", PageController, :index
+    get "/guest", GuestController, :show
+  end
+
+  scope "/", ArenaWeb do
+    get "/play", GuestController, :play
   end
 end

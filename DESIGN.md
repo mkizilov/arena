@@ -1,6 +1,6 @@
 # Arena design
 
-The pure game core and match process are implemented; channel events are planned.
+The pure game core, match process, guest identity, and match channels are implemented.
 
 ## Rules
 
@@ -8,7 +8,7 @@ Each match runs on a 40 × 30 grid with up to eight snakes. The server advances 
 
 ## Architecture
 
-`Arena.Game` is a pure, deterministic state-transition core. Its inputs include the current state, player commands, and explicit random seed state; it performs no process operations, clock reads, or implicit random calls. A single `Arena.Match` GenServer per match owns the game state, gathers commands and schedules ticks. Phoenix Channels will validate and translate transport messages, forward commands to the match, and relay server snapshots; they contain no game rules. The server is authoritative: clients never submit positions, scores, or outcomes as truth.
+`Arena.Game` is a pure, deterministic state-transition core. Its inputs include the current state, player commands, and explicit random seed state; it performs no process operations, clock reads, or implicit random calls. A single `Arena.Match` GenServer per match owns the game state, gathers commands and schedules ticks. Phoenix Channels validate and translate transport messages, forward commands to the match, and relay server snapshots; they contain no game rules. The server is authoritative: clients never submit positions, scores, or outcomes as truth.
 
 ### Core contract
 
@@ -24,7 +24,7 @@ If all snakes die on the same tick, the result has no winners and reason `:simul
 
 `input(id, player, direction)` accepts a valid direction from a joined living player while running, retaining only the latest input until the next tick. `snapshot(id)` returns the current phase, ordered players and game state. A match runs at 15 ticks per second against deadlines derived from a monotonic epoch; if delayed, it catches up without skipping simulation ticks. `manual: true` disables automatic running ticks and allows `tick(id)` to advance exactly one tick. Options `:seed`, `:countdown_ms`, `:idle_ms`, and `:grace_ms` allow deterministic and bounded tests; a seed is generated at match creation if omitted. Countdown, idle and shutdown timers remain active in manual mode.
 
-Subscribers to `Arena.Match.topic(id)` on `Arena.PubSub` receive `{:match_status, id, phase, players}` on membership or phase changes and `{:match_tick, id, game, events}` after each tick, including the final tick. If the match exits abnormally, the lobby publishes `{:match_ended_unexpectedly, id}` on the same topic; normal idle and grace shutdowns are not crashes. `Arena.Lobby.matches/0` lists live match process IDs (including finished matches during their grace period). The published game is the Elixir core state, not a wire-format payload. The future channel must relay unexpected-end notifications as well as serialize state, authenticate and authorize players. Calls for an unknown or already stopped match exit as normal `GenServer.call` failures; callers should handle that boundary.
+Subscribers to `Arena.Match.topic(id)` on `Arena.PubSub` receive `{:match_status, id, phase, players}` on membership or phase changes and `{:match_tick, id, game, events}` after each tick, including the final tick. If the match exits abnormally, the lobby publishes `{:match_ended_unexpectedly, id}` on the same topic; normal idle and grace shutdowns are not crashes. `Arena.Lobby.matches/0` lists live match process IDs (including finished matches during their grace period). The published game is the Elixir core state, not a wire-format payload; the channel serializes it and relays crash notifications. Calls for an unknown or already stopped match exit as normal `GenServer.call` failures; callers should handle that boundary.
 
 ### Matchmaking and lobby
 
@@ -53,18 +53,20 @@ graph TD
 
 The application uses `:rest_for_one` in the order shown: if PubSub or the registry fails, dependent matches and services restart rather than retain invalid connections or registrations; a match supervisor failure likewise rebuilds its dependents. A lobby failure leaves matches running, and the restarted lobby discovers and monitors surviving registered children before accepting new requests. Matchmaker, task supervisor, Repo and endpoint are permanent services restarted with their dependencies; Repo is late in the order so a database failure does not terminate matches. Individual side-work tasks are temporary and do not restart the task supervisor. Matches are temporary rather than transient because no durable snapshot exists: restarting a crashed process with its original arguments would silently replace an in-progress game with a fresh one. The lobby monitors each match and sends the crash notification before releasing its ID. A match can be recreated after the lobby processes its termination.
 
-Crash notifications are in-memory, best effort, and require a running lobby and PubSub; a lobby or PubSub outage concurrent with a match crash can lose a notification. Lobby recovery restores monitoring of surviving matches, not notifications for matches that disappeared while it was down. No channel transport exists yet, so network clients cannot receive these notifications until that transport is implemented.
+Crash notifications are in-memory, best effort, and require a running lobby and PubSub; a lobby or PubSub outage concurrent with a match crash can lose a notification. Lobby recovery restores monitoring of surviving matches, not notifications for matches that disappeared while it was down.
 
-## Planned protocol
+## Guest identity and channel protocol
 
-Phoenix socket topic `match:<match_id>` represents a match. Payloads are JSON objects. Authentication and channel transport are outside this initial scaffold; production access must authenticate and authorize before joining.
+`GET /guest` issues a random guest ID and display name signed with `Phoenix.Token`, with a 30-day maximum age and `Cache-Control: no-store`. Supplying an existing token in `Authorization: Bearer <token>` returns the same identity if valid, otherwise a new identity. The `/play` example stores the token in browser local storage and connects to `/socket/websocket` using it as the `token` parameter. The socket verifies the token on connect and the channel verifies it again on join. A token is a bearer credential: use HTTPS/WSS in production, protect against XSS, and redact socket query strings from access logs. There is no revocation, account recovery, or authenticated account linkage.
+
+Phoenix socket topic `match:<match_id>` represents a match. A valid guest may join a public match with room, or join a private match by knowing its full `room-<code>` ID. Previously assigned players may reconnect to a running match, while new players cannot join after it starts; finished matches reject joins. Guest identity and the room code are not a substitute for full authorization or rate limiting. Channel disconnect currently retains membership; it does not automatically forfeit, so another connection using the same token may rejoin without cancelling an active player. A future transport policy must handle abandoned players and duplicate sessions.
 
 | Direction | Event | Payload / meaning |
 | --- | --- | --- |
-| Client → server | join topic | Join reply contains player ID, current tick, and full snapshot, or an error such as `full` or `finished`. |
-| Client → server | `input` | `{ "direction": "up" \| "down" \| "left" \| "right", "seq": integer }`; the server validates membership, sequence and legal turns. |
-| Server → clients | `state` | `{ "tick": integer, "snakes": [...], "food": [...], "scores": {...} }`, an authoritative snapshot. |
-| Server → clients | `finished` | `{ "tick": integer, "winners": [player_id], "reason": "last_alive" \| "time_limit" \| "simultaneous_death" }`. |
-| Server → client | reply/error | Input acknowledgement or rejection; a client reconnects by rejoining and receiving a full snapshot. |
+| Client → server | join topic | Reply includes `player` (ID and name), `phase`, and `state` (null before start), or a reason such as `full`, `finished`, `started`, `not_found`, or `invalid_token`. |
+| Client → server | `input` | `{ "direction": "up" \| "down" \| "left" \| "right" }`; a reply acknowledges or rejects it. The match buffers the latest accepted direction; the core validates turns. |
+| Server → client | `status` | `{ "phase": string, "players": [player_id] }` after joining and on membership or phase changes. |
+| Server → client | `state` | `{ "state": { "tick": integer, "width": integer, "height": integer, "snakes": {...}, "food": [x,y] \| null, "result": object \| null }, "events": [...] }` on each tick, and an initial snapshot after joining a running match. Snakes contain head-first body cells, direction, alive flag and score. |
+| Server → client | `match_ended` | `{ "reason": "unexpected" \| "unavailable" }` when the match crashes or cannot be reached. Normal results appear in `state.result` and the `match_over` event. |
 
-The match serializes commands and determines their effective tick; clients use tick numbers to discard stale snapshots. Input rate limits remain to be specified when the transport is implemented.
+The match serializes commands and determines their effective tick; clients should use tick numbers to discard stale snapshots. Input sequence numbers and rate limits are not implemented. The sample client is a diagnostic page, not a full game UI or matchmaking interface, and does not automatically reconnect.
