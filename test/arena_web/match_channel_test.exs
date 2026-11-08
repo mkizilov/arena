@@ -71,6 +71,9 @@ defmodule ArenaWeb.MatchChannelTest do
 
     ref = push(channel, "input", %{"direction" => "north"})
     assert_reply ref, :error, %{reason: "invalid_direction"}
+
+    ref = push(channel, "ping", %{})
+    assert_reply ref, :ok
   end
 
   test "a crashed match notifies the connected channel" do

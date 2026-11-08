@@ -69,6 +69,7 @@ defmodule Arena.Match do
       idle_ms: Keyword.get(opts, :idle_ms, 60_000),
       grace_ms: Keyword.get(opts, :grace_ms, 10_000),
       timer: nil,
+      countdown_ends_at: nil,
       epoch: nil,
       scheduled_tick: 0
     }
@@ -84,7 +85,13 @@ defmodule Arena.Match do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply,
-     %{phase: state.phase, players: state.players, game: state.game, visibility: state.visibility},
+     %{
+       phase: state.phase,
+       players: state.players,
+       game: state.game,
+       visibility: state.visibility,
+       countdown_ms: countdown_remaining(state)
+     },
      state}
   end
 
@@ -221,8 +228,15 @@ defmodule Arena.Match do
     if state.timer, do: Process.cancel_timer(elem(state.timer, 0))
     token = make_ref()
     ref = Process.send_after(self(), {:timer, kind, token}, delay)
-    %{state | timer: {ref, token}}
+    deadline = if kind == :countdown, do: System.monotonic_time(:millisecond) + delay, else: nil
+    %{state | timer: {ref, token}, countdown_ends_at: deadline}
   end
+
+  defp countdown_remaining(%{phase: :countdown, countdown_ends_at: deadline})
+       when is_integer(deadline),
+       do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp countdown_remaining(_state), do: nil
 
   defp broadcast_status(state) do
     Phoenix.PubSub.broadcast(

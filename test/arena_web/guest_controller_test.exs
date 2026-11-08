@@ -33,4 +33,20 @@ defmodule ArenaWeb.GuestControllerTest do
     assert script.status == 200
     assert script.resp_body =~ "arena.guestToken"
   end
+
+  test "game and framework modules are served as JavaScript with a whitelist" do
+    for path <- [
+          "/assets/game/app.mjs",
+          "/assets/game/hook.mjs",
+          "/assets/game/render.mjs",
+          "/assets/vendor/phoenix.mjs",
+          "/assets/vendor/phoenix_live_view.esm.js"
+        ] do
+      response = conn(:get, path) |> ArenaWeb.Endpoint.call([])
+      assert response.status == 200
+      assert Plug.Conn.get_resp_header(response, "content-type") == ["text/javascript; charset=utf-8"]
+    end
+
+    assert (conn(:get, "/assets/game/other.mjs") |> ArenaWeb.Endpoint.call([])).status == 404
+  end
 end

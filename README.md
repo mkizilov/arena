@@ -8,7 +8,9 @@ Install the versions in `.tool-versions` with a project-local version manager, t
 
 Run `mix check` for compilation, tests, formatting, Credo and Dialyzer; the test alias creates and migrates its own database. Dialyzer PLTs are stored in `priv/plts/`. Stop PostgreSQL with `docker compose down` when finished.
 
-Visit `http://127.0.0.1:22300/play` for the basic guest client. It stores a signed guest token in local storage and joins an existing match ID; match creation and matchmaking are not exposed through this page. Arrow keys send directions. Run its standalone JavaScript tests with `node --test --test-concurrency=2 test/js/guest.test.cjs`.
+Visit `http://127.0.0.1:22300/lobby` for quick play, private rooms, and the open match list. The match page renders the board on a canvas; arrow keys and WASD send directions. The client stores a signed guest token in local storage. The earlier diagnostic page remains at `/play`. Run the browser module tests with `node --test --test-concurrency=2 test/js/*.test.*`.
+
+Game modules live in `assets/js/game/` and are embedded into the application at compile time; edits trigger recompilation. The browser receives Phoenix and LiveView's prebuilt ES modules from their installed dependencies, so no Node package installation or separate asset build is required. `floki` is a test-only dependency for LiveView tests.
 
 Production requires `DATABASE_URL` and `SECRET_KEY_BASE`; set `PHX_SERVER` to start the HTTP endpoint and `PHX_HOST` to its public hostname. TLS termination is expected upstream.
 

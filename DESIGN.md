@@ -65,8 +65,15 @@ Phoenix socket topic `match:<match_id>` represents a match. A valid guest may jo
 | --- | --- | --- |
 | Client → server | join topic | Reply includes `player` (ID and name), `phase`, and `state` (null before start), or a reason such as `full`, `finished`, `started`, `not_found`, or `invalid_token`. |
 | Client → server | `input` | `{ "direction": "up" \| "down" \| "left" \| "right" }`; a reply acknowledges or rejects it. The match buffers the latest accepted direction; the core validates turns. |
-| Server → client | `status` | `{ "phase": string, "players": [player_id] }` after joining and on membership or phase changes. |
+| Client → server | `ping` | Empty payload; the reply is used to measure round-trip latency. |
+| Server → client | `status` | `{ "phase": string, "players": [player_id], "countdown_ms": integer \| null }` after joining and on membership or phase changes. |
 | Server → client | `state` | `{ "state": { "tick": integer, "width": integer, "height": integer, "snakes": {...}, "food": [x,y] \| null, "result": object \| null }, "events": [...] }` on each tick, and an initial snapshot after joining a running match. Snakes contain head-first body cells, direction, alive flag and score. |
 | Server → client | `match_ended` | `{ "reason": "unexpected" \| "unavailable" }` when the match crashes or cannot be reached. Normal results appear in `state.result` and the `match_over` event. |
 
-The match serializes commands and determines their effective tick; clients should use tick numbers to discard stale snapshots. Input sequence numbers and rate limits are not implemented. The sample client is a diagnostic page, not a full game UI or matchmaking interface, and does not automatically reconnect.
+The match serializes commands and determines their effective tick; clients discard stale snapshots. Input sequence numbers and rate limits are not implemented.
+
+## Browser client
+
+`/lobby` is a LiveView with quick play, room creation and code joining, and a PubSub-driven list of public open matches. A signed guest token is obtained before LiveView connects and is verified in its connected mount. The LiveView process owns its queue entry, so disconnecting while queued removes it. Selecting a match navigates to `/matches/<id>`; private match pages show the room code for sharing.
+
+The `Game` LiveView hook opens the authenticated match channel, sends arrow/WASD directions, displays the countdown, scores, result, and a two-second ping round-trip measurement. Its `requestAnimationFrame` loop interpolates snake segments from the previous authoritative snapshot to the latest over one 15 Hz tick interval (typically drawing at 60 Hz); missing ticks snap to the latest snapshot rather than extrapolating. Rendering does not change server state. Hook teardown closes the channel, socket, timer and animation loop. JavaScript is kept under `assets/js/game/`; Phoenix/LiveView ES modules are served from installed dependencies, while the game modules are embedded at compile time for releases.

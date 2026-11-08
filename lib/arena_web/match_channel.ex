@@ -14,7 +14,13 @@ defmodule ArenaWeb.MatchChannel do
          {:ok, snapshot} <- admit(id, guest.id) do
       send(self(), :after_join)
       socket = socket |> assign(:match_id, id) |> assign(:guest, guest)
-      {:ok, %{player: guest, phase: snapshot.phase, state: GameJSON.render(snapshot.game)}, socket}
+      {:ok,
+       %{
+         player: guest,
+         phase: snapshot.phase,
+         countdown_ms: snapshot.countdown_ms,
+         state: GameJSON.render(snapshot.game)
+       }, socket}
     else
       {:error, reason} -> {:error, %{reason: to_string(reason)}}
     end
@@ -23,6 +29,8 @@ defmodule ArenaWeb.MatchChannel do
   def join(_, _payload, _socket), do: {:error, %{reason: "not_found"}}
 
   @impl true
+  def handle_in("ping", _payload, socket), do: {:reply, :ok, socket}
+
   def handle_in("input", %{"direction" => direction}, socket) do
     case Map.fetch(@directions, direction) do
       {:ok, direction} ->
@@ -48,7 +56,11 @@ defmodule ArenaWeb.MatchChannel do
   def handle_info(:after_join, socket) do
     case match_call(fn -> Match.snapshot(socket.assigns.match_id) end) do
       {:ok, snapshot} ->
-        push(socket, "status", %{phase: snapshot.phase, players: snapshot.players})
+        push(socket, "status", %{
+          phase: snapshot.phase,
+          players: snapshot.players,
+          countdown_ms: snapshot.countdown_ms
+        })
 
         if snapshot.game do
           push(socket, "state", %{state: GameJSON.render(snapshot.game), events: []})
@@ -67,7 +79,15 @@ defmodule ArenaWeb.MatchChannel do
   end
 
   def handle_info({:match_status, id, phase, players}, %{assigns: %{match_id: id}} = socket) do
-    push(socket, "status", %{phase: phase, players: players})
+    countdown_ms =
+      if phase == :countdown do
+        case match_call(fn -> Match.snapshot(id) end) do
+          {:ok, snapshot} -> snapshot.countdown_ms
+          _ -> nil
+        end
+      end
+
+    push(socket, "status", %{phase: phase, players: players, countdown_ms: countdown_ms})
     {:noreply, socket}
   end
 
