@@ -24,13 +24,17 @@ defmodule ArenaWeb.LeaderboardLive do
       <section>
         <h2>Most wins</h2>
         <ol id="top-wins">
-          <li :for={player <- @wins}>{player.display_name}: {player.wins} wins (best {player.best_score})</li>
+          <li :for={player <- @wins}>
+            {player.display_name}: {player.wins} wins (best {player.best_score})
+          </li>
         </ol>
       </section>
       <section>
         <h2>Best score</h2>
         <ol id="top-scores">
-          <li :for={player <- @scores}>{player.display_name}: {player.best_score} points ({player.wins} wins)</li>
+          <li :for={player <- @scores}>
+            {player.display_name}: {player.best_score} points ({player.wins} wins)
+          </li>
         </ol>
       </section>
     </main>
@@ -38,16 +42,18 @@ defmodule ArenaWeb.LeaderboardLive do
   end
 
   defp refresh(socket) do
-    try do
-      assign(socket, wins: Leaderboard.top(:wins), scores: Leaderboard.top(:best_score), error: false)
-    rescue
-      error ->
-        Logger.warning("leaderboard unavailable: #{Exception.message(error)}")
-        assign(socket, wins: [], scores: [], error: true)
-    catch
-      :exit, reason ->
-        Logger.warning("leaderboard unavailable: #{inspect(reason)}")
-        assign(socket, wins: [], scores: [], error: true)
-    end
+    assign(socket,
+      wins: Leaderboard.top(:wins),
+      scores: Leaderboard.top(:best_score),
+      error: false
+    )
+  rescue
+    error ->
+      Logger.warning("leaderboard unavailable: #{Exception.message(error)}")
+      assign(socket, wins: [], scores: [], error: true)
+  catch
+    :exit, reason ->
+      Logger.warning("leaderboard unavailable: #{inspect(reason)}")
+      assign(socket, wins: [], scores: [], error: true)
   end
 end

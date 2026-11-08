@@ -26,6 +26,7 @@ defmodule ArenaLoad.StatsTest do
 
   test "seeded bot directions never immediately reverse" do
     opposites = %{"up" => "down", "down" => "up", "left" => "right", "right" => "left"}
+
     for current <- Map.keys(opposites) do
       Enum.reduce(1..100, :rand.seed_s(:exsss, {1, 2, 3}), fn _, rng ->
         {direction, rng} = ArenaLoad.Bot.next_direction(current, rng)

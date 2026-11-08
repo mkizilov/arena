@@ -6,10 +6,12 @@ defmodule Arena.MatchReplicaTest do
   test "replicas retain the newest sequence and can restore a lost local checkpoint" do
     id = "replica-#{System.unique_integer([:positive, :monotonic])}"
     instance = "instance-#{id}"
+
     on_exit(fn ->
       MatchStore.delete(id)
       MatchStore.abort_prepare(id, instance)
     end)
+
     assert :ok = MatchStore.prepare(id, instance)
     newer = %{seq: 7, state: %{result_id: instance, game: :newest}, result: nil}
     older = %{seq: 6, state: %{result_id: instance, game: :stale}, result: nil}
@@ -26,11 +28,19 @@ defmodule Arena.MatchReplicaTest do
 
   test "different match instances sharing an ID do not reuse a stale snapshot" do
     id = "replica-#{System.unique_integer([:positive, :monotonic])}"
+
     on_exit(fn ->
       MatchStore.abort_prepare(id, "new")
       MatchReplica.delete(node(), id, "old")
     end)
-    assert :ok = MatchReplica.put(node(), id, "old", %{seq: 9, state: %{result_id: "old"}, result: nil})
+
+    assert :ok =
+             MatchReplica.put(node(), id, "old", %{
+               seq: 9,
+               state: %{result_id: "old"},
+               result: nil
+             })
+
     assert :ok = MatchStore.prepare(id, "new")
     assert :new = MatchStore.get(id, "new")
     assert :ok = MatchStore.abort_prepare(id, "new")

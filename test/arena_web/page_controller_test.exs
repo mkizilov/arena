@@ -1,7 +1,7 @@
 defmodule ArenaWeb.PageControllerTest do
   @moduledoc false
   use ExUnit.Case, async: true
-  use Plug.Test
+  import Plug.Test
 
   test "GET / identifies the application" do
     conn = conn(:get, "/") |> ArenaWeb.Endpoint.call([])

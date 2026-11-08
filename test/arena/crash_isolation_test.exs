@@ -6,6 +6,7 @@ defmodule Arena.CrashIsolationTest do
   defp create_match(opts \\ []) do
     id = "isolation-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
+
     {:ok, pid} =
       Matchmaker.start_match(id, Keyword.merge([seed: {1, 2, 3}, countdown_ms: 0], opts))
 
@@ -51,7 +52,14 @@ defmodule Arena.CrashIsolationTest do
     player_subscriber(failed_id, :b)
     assert failed_id in Lobby.matches()
     assert live_id in Lobby.matches()
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "state", payload: %{state: %{tick: first_tick}}}, 1_000
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     topic: "match:" <> ^live_id,
+                     event: "state",
+                     payload: %{state: %{tick: first_tick}}
+                   },
+                   1_000
+
     assert :ok = Match.tick(failed_id)
     before = Match.snapshot(failed_id).game
 
@@ -68,7 +76,14 @@ defmodule Arena.CrashIsolationTest do
     assert live_id in Lobby.matches()
     assert Process.alive?(live_pid)
     assert [{^recovered_pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, failed_id)
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "delta", payload: %{tick: tick}} when tick > first_tick, 1_000
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     topic: "match:" <> ^live_id,
+                     event: "delta",
+                     payload: %{tick: tick}
+                   }
+                   when tick > first_tick,
+                   1_000
   end
 
   test "normal shutdown removes a match without reporting a crash" do

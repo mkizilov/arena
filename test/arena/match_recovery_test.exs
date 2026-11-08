@@ -6,7 +6,12 @@ defmodule Arena.MatchRecoveryTest do
   defp start_match(opts \\ []) do
     id = "recovery-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
-    {:ok, _pid} = Match.start_match(id, Keyword.merge([players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true], opts))
+
+    {:ok, _pid} =
+      Match.start_match(
+        id,
+        Keyword.merge([players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true], opts)
+      )
 
     on_exit(fn ->
       case Horde.Registry.lookup(Arena.MatchRegistry, id) do
@@ -20,11 +25,13 @@ defmodule Arena.MatchRecoveryTest do
   end
 
   defp session do
-    pid = spawn(fn ->
-      receive do
-        :stop -> :ok
-      end
-    end)
+    pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
     on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
     pid
   end
@@ -111,21 +118,23 @@ defmodule Arena.MatchRecoveryTest do
       {count, rng} = :rand.uniform_s(3, rng)
       kills = for offset <- 0..(count - 1), into: MapSet.new(), do: first + 7 * offset
 
-      result = Enum.reduce_while(1..40, nil, fn tick, _ ->
-        if MapSet.member?(kills, tick) do
-          before = Match.snapshot(id).game
-          {:ok, checkpoint} = MatchStore.get(id)
-          assert checkpoint.game == before
-          crash_and_wait(id)
-          assert Match.snapshot(id).game == before
-        end
+      result =
+        Enum.reduce_while(1..40, nil, fn tick, _ ->
+          if MapSet.member?(kills, tick) do
+            before = Match.snapshot(id).game
+            {:ok, checkpoint} = MatchStore.get(id)
+            assert checkpoint.game == before
+            crash_and_wait(id)
+            assert Match.snapshot(id).game == before
+          end
 
-        assert :ok = Match.tick(id)
-        case Match.snapshot(id).game.result do
-          nil -> {:cont, nil}
-          result -> {:halt, result}
-        end
-      end)
+          assert :ok = Match.tick(id)
+
+          case Match.snapshot(id).game.result do
+            nil -> {:cont, nil}
+            result -> {:halt, result}
+          end
+        end)
 
       assert result != nil
       :ok = Match.stop(id)

@@ -10,7 +10,9 @@ defmodule ArenaWeb.MatchLive do
     ~H"""
     <main>
       <h1>Match {@id}</h1>
-      <p :if={String.starts_with?(@id, "room-")}>Room code: {String.replace_prefix(@id, "room-", "")}</p>
+      <p :if={String.starts_with?(@id, "room-")}>
+        Room code: {String.replace_prefix(@id, "room-", "")}
+      </p>
       <a href="/lobby">Back to lobby</a>
       <div id="match-game" phx-hook="Game" phx-update="ignore" data-match-id={@id}>
         <p data-status aria-live="polite">Connecting…</p>

@@ -37,7 +37,9 @@ defmodule ArenaWeb.LobbyLive do
       <a href="/leaderboard">Leaderboard</a>
       <p :if={@guest}>Playing as {@guest.name}</p>
       <p :if={!@guest && !@identity_ready}>Connecting guest identity…</p>
-      <p :if={!@guest && @identity_ready} role="alert">Guest identity unavailable. Reload to retry.</p>
+      <p :if={!@guest && @identity_ready} role="alert">
+        Guest identity unavailable. Reload to retry.
+      </p>
       <p :if={@error} role="alert">{@error}</p>
       <button phx-click="quick_play" disabled={!@guest || @queued}>Quick play</button>
       <button :if={@queued} phx-click="cancel">Cancel queue</button>
@@ -121,7 +123,8 @@ defmodule ArenaWeb.LobbyLive do
   def handle_event(_, _, socket), do: {:noreply, assign(socket, error: "Invalid request")}
 
   @impl true
-  def handle_info({:lobby_updated, matches}, socket), do: {:noreply, assign(socket, matches: matches)}
+  def handle_info({:lobby_updated, matches}, socket),
+    do: {:noreply, assign(socket, matches: matches)}
 
   def handle_info({:match_found, id, player}, %{assigns: %{guest: %{id: player}}} = socket) do
     {:noreply, push_navigate(socket, to: "/matches/#{URI.encode(id)}")}

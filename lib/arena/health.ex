@@ -1,6 +1,7 @@
 defmodule Arena.Health do
   @moduledoc "Readiness checks for the database and converged cluster membership."
   require Logger
+  alias Ecto.Adapters.SQL
 
   def check do
     %{database: database_ready?(), cluster: cluster_ready?()}
@@ -9,7 +10,7 @@ defmodule Arena.Health do
   def ready?(%{database: database, cluster: cluster}), do: database and cluster
 
   def database_ready? do
-    case Ecto.Adapters.SQL.query(Arena.Repo, "SELECT 1", [], timeout: 1_000, queue_timeout: 1_000) do
+    case SQL.query(Arena.Repo, "SELECT 1", [], timeout: 1_000, queue_timeout: 1_000) do
       {:ok, %{rows: [[1]]}} -> true
       {:error, _reason} -> false
     end
@@ -48,7 +49,9 @@ defmodule Arena.Health do
     MapSet.member?(common, current) and MapSet.size(common) >= expected
   end
 
-  defp member_node({name, member}, expected, _current) when name == expected and is_atom(member), do: member
+  defp member_node({name, member}, expected, _current) when name == expected and is_atom(member),
+    do: member
+
   defp member_node(name, expected, current) when name == expected and is_atom(name), do: current
   defp member_node(_, _name, _current), do: nil
 end

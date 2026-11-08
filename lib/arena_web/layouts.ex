@@ -18,7 +18,8 @@ defmodule ArenaWeb.Layouts do
           button { cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .5; }
           section { margin-top: 2rem; } canvas { max-width: 100%; height: auto; border: 1px solid #475569; }
         </style>
-        <script type="module" src="/assets/game/app.mjs"></script>
+        <script type="module" src="/assets/game/app.mjs">
+        </script>
       </head>
       <body>{@inner_content}</body>
     </html>

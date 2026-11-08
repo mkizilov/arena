@@ -43,6 +43,9 @@ defmodule ArenaWeb.Router do
 
   scope "/" do
     pipe_through :browser
-    live_dashboard "/dashboard", metrics: Arena.Metrics, additional_pages: [arena: ArenaWeb.ObservabilityPage]
+
+    live_dashboard "/dashboard",
+      metrics: Arena.Metrics,
+      additional_pages: [arena: ArenaWeb.ObservabilityPage]
   end
 end

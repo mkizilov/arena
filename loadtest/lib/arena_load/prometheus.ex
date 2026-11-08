@@ -10,29 +10,37 @@ defmodule ArenaLoad.Prometheus do
   }
 
   def parse(text) do
-    Enum.reduce(String.split(text, "\n"), %{buckets: %{}, overruns: nil, messages_in: nil, messages_out: nil}, fn line, acc ->
-      case Regex.named_captures(@line, line) do
-        %{"name" => @bucket, "labels" => labels, "value" => value} ->
-          case Regex.run(~r/(?:^|,)le="([^"]+)"/, labels) do
-            [_, bound] -> put_in(acc, [:buckets, bound], number(value))
-            _ -> acc
-          end
+    Enum.reduce(
+      String.split(text, "\n"),
+      %{buckets: %{}, overruns: nil, messages_in: nil, messages_out: nil},
+      fn line, acc ->
+        case Regex.named_captures(@line, line) do
+          %{"name" => @bucket, "labels" => labels, "value" => value} ->
+            case Regex.run(~r/(?:^|,)le="([^"]+)"/, labels) do
+              [_, bound] -> put_in(acc, [:buckets, bound], number(value))
+              _ -> acc
+            end
 
-        %{"name" => name, "value" => value} ->
-          case Enum.find(@counters, fn {_key, prefix} -> name in [prefix, prefix <> "_total"] end) do
-            {key, _} -> Map.put(acc, key, number(value))
-            nil -> acc
-          end
+          %{"name" => name, "value" => value} ->
+            case Enum.find(@counters, fn {_key, prefix} ->
+                   name in [prefix, prefix <> "_total"]
+                 end) do
+              {key, _} -> Map.put(acc, key, number(value))
+              nil -> acc
+            end
 
-        _ -> acc
+          _ ->
+            acc
+        end
       end
-    end)
+    )
   end
 
   def difference(before, after_sample, seconds) do
-    buckets = Map.new(after_sample.buckets, fn {bound, value} ->
-      {bound, value - Map.get(before.buckets, bound, 0.0)}
-    end)
+    buckets =
+      Map.new(after_sample.buckets, fn {bound, value} ->
+        {bound, value - Map.get(before.buckets, bound, 0.0)}
+      end)
 
     valid = Map.has_key?(buckets, "+Inf") and Enum.all?(buckets, fn {_, value} -> value >= 0 end)
 
@@ -49,6 +57,7 @@ defmodule ArenaLoad.Prometheus do
 
   defp percentile(buckets, quantile) do
     total = buckets["+Inf"]
+
     if total <= 0 do
       nil
     else
@@ -74,6 +83,7 @@ defmodule ArenaLoad.Prometheus do
   defp subtract(nil, value), do: value
   defp subtract(before, value) when value >= before, do: value - before
   defp subtract(_, _), do: nil
+
   defp rate(before, value, seconds) do
     case subtract(before, value) do
       nil -> nil

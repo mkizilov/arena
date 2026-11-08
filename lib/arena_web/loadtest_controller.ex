@@ -13,7 +13,8 @@ defmodule ArenaWeb.LoadtestController do
             nil -> {bytes, count}
           end
 
-        _, acc -> acc
+        _, acc ->
+          acc
       end)
 
     {runtime_ms, _} = :erlang.statistics(:runtime)
@@ -26,15 +27,16 @@ defmodule ArenaWeb.LoadtestController do
       vm_memory_bytes: :erlang.memory(:total),
       match_process_memory_bytes: bytes,
       match_process_count: count,
-      promex_pid: case Process.whereis(Arena.PromEx) do
-        nil -> nil
-        pid -> pid |> :erlang.pid_to_list() |> List.to_string()
-      end,
+      promex_pid:
+        case Process.whereis(Arena.PromEx) do
+          nil -> nil
+          pid -> pid |> :erlang.pid_to_list() |> List.to_string()
+        end,
       metrics_generation: metrics.generation,
       overruns: metrics.overruns,
       messages_in: metrics.messages_in,
       messages_out: metrics.messages_out,
-      os_pid: :erlang.system_info(:os_pid) |> List.to_string()
+      os_pid: System.pid()
     })
   end
 end

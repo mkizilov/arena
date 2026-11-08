@@ -55,7 +55,13 @@ defmodule ArenaWeb.GameJSON do
         {moves, deaths, scores}
       end)
 
-    delta = %{tick: current.tick, moves: moves, deaths: Enum.sort(deaths), scores: scores, events: events(events)}
+    delta = %{
+      tick: current.tick,
+      moves: moves,
+      deaths: Enum.sort(deaths),
+      scores: scores,
+      events: events(events)
+    }
 
     delta =
       if previous.food != current.food do
@@ -66,7 +72,10 @@ defmodule ArenaWeb.GameJSON do
 
     delta =
       if Map.get(previous, :power_up) != Map.get(current, :power_up) do
-        Map.merge(delta, %{power_up_removed: cell(Map.get(previous, :power_up)), power_up_added: cell(Map.get(current, :power_up))})
+        Map.merge(delta, %{
+          power_up_removed: cell(Map.get(previous, :power_up)),
+          power_up_added: cell(Map.get(current, :power_up))
+        })
       else
         delta
       end
@@ -77,7 +86,10 @@ defmodule ArenaWeb.GameJSON do
   defp event({:ate, id, position}), do: %{type: :ate, player: id, cell: cell(position)}
   defp event({:died, id}), do: %{type: :died, player: id}
   defp event({:food_spawned, position}), do: %{type: :food_spawned, cell: cell(position)}
-  defp event({:power_up_collected, id, position}), do: %{type: :power_up_collected, player: id, cell: cell(position)}
+
+  defp event({:power_up_collected, id, position}),
+    do: %{type: :power_up_collected, player: id, cell: cell(position)}
+
   defp event({:power_up_spawned, position}), do: %{type: :power_up_spawned, cell: cell(position)}
   defp event({:match_over, result}), do: %{type: :match_over, result: result}
 

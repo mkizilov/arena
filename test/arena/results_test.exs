@@ -6,12 +6,13 @@ defmodule Arena.ResultsTest do
 
   alias Arena.{Leaderboard, Match, MatchStore, Repo, Results}
   alias Arena.Persistence.{MatchResult, Player, PlayerStat}
+  alias Ecto.Adapters.SQL.Sandbox
 
   @endpoint ArenaWeb.Endpoint
 
   setup do
-    owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Repo, shared: true)
-    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+    owner = Sandbox.start_owner!(Repo, shared: true)
+    on_exit(fn -> Sandbox.stop_owner(owner) end)
     await_pending()
     Repo.delete_all(PlayerStat)
     Repo.delete_all(MatchResult)
@@ -35,12 +36,14 @@ defmodule Arena.ResultsTest do
     id = "persist-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
     {:ok, _pid} = Match.start_match(id, players: players, countdown_ms: 0, manual: true)
+
     on_exit(fn ->
       case Horde.Registry.lookup(Arena.MatchRegistry, id) do
         [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
+
     assert_receive {:match_status, ^id, :running, _}, 1_000
     id
   end
@@ -48,27 +51,37 @@ defmodule Arena.ResultsTest do
   defp subscribe_telemetry do
     handler = "arena-results-test-#{System.unique_integer([:positive, :monotonic])}"
     events = [[:arena, :result_writer, :start], [:arena, :result_writer, :retry]]
-    :ok = :telemetry.attach_many(handler, events, fn event, _measurements, metadata, owner ->
-      send(owner, {event, metadata.match_id})
-    end, self())
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        events,
+        fn event, _measurements, metadata, owner ->
+          send(owner, {event, metadata.match_id})
+        end,
+        self()
+      )
+
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
   defp await_pending do
-    Enum.reduce_while(1..1_600, nil, fn _, _ ->
-      if MatchStore.pending_results() == [] do
-        {:halt, nil}
-      else
-        Process.sleep(20)
-        {:cont, nil}
-      end
-    end)
+    :ok =
+      Enum.reduce_while(1..1_600, :timeout, fn _, _ ->
+        if MatchStore.pending_results() == [] do
+          {:halt, :ok}
+        else
+          Process.sleep(20)
+          {:cont, :timeout}
+        end
+      end)
 
     assert MatchStore.pending_results() == []
   end
 
   defp await_html(view, text, attempts \\ 100)
   defp await_html(_view, text, 0), do: flunk("leaderboard did not update with #{text}")
+
   defp await_html(view, text, attempts) do
     if render(view) =~ text do
       :ok
@@ -111,8 +124,16 @@ defmodule Arena.ResultsTest do
 
   test "the leaderboard refreshes when a persisted result is broadcast" do
     {:ok, view, _html} = live(build_conn(), "/leaderboard")
-    assert {:ok, :inserted} = Results.record(result("live-board", %{"new-player" => 5}, ["new-player"]))
-    Phoenix.PubSub.broadcast(Arena.PubSub, Leaderboard.topic(), {:leaderboard_updated, "live-board"})
+
+    assert {:ok, :inserted} =
+             Results.record(result("live-board", %{"new-player" => 5}, ["new-player"]))
+
+    Phoenix.PubSub.broadcast(
+      Arena.PubSub,
+      Leaderboard.topic(),
+      {:leaderboard_updated, "live-board"}
+    )
+
     assert :ok = await_html(view, "Name-new-player")
   end
 
@@ -122,12 +143,16 @@ defmodule Arena.ResultsTest do
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Leaderboard.topic())
     id = start_match(["slow-a", "slow-b"])
     other = start_match(["other-a", "other-b"])
+
     Repo.query!("""
     CREATE FUNCTION arena_test_slow_result() RETURNS trigger AS $$
     BEGIN IF NEW.guest_id = 'slow-a' THEN PERFORM pg_sleep(1.5); END IF; RETURN NEW; END;
     $$ LANGUAGE plpgsql
     """)
-    Repo.query!("CREATE TRIGGER arena_test_slow BEFORE INSERT ON players FOR EACH ROW EXECUTE FUNCTION arena_test_slow_result()")
+
+    Repo.query!(
+      "CREATE TRIGGER arena_test_slow BEFORE INSERT ON players FOR EACH ROW EXECUTE FUNCTION arena_test_slow_result()"
+    )
 
     {:ok, _view, html} = live(build_conn(), "/leaderboard")
     refute html =~ "Guest-slow-a"
@@ -138,7 +163,10 @@ defmodule Arena.ResultsTest do
     assert_receive {[:arena, :result_writer, :start], ^id}, 5_000
     refute_receive {:leaderboard_updated, ^id}, 100
     {elapsed_us, :ok} = :timer.tc(fn -> Match.tick(other) end)
-    pending_during_tick = Enum.any?(MatchStore.pending_results(), fn {_key, result} -> result.match_id == id end)
+
+    pending_during_tick =
+      Enum.any?(MatchStore.pending_results(), fn {_key, result} -> result.match_id == id end)
+
     assert pending_during_tick
     assert elapsed_us < 1_000_000
     assert Match.snapshot(other).game.tick == 1
@@ -155,16 +183,25 @@ defmodule Arena.ResultsTest do
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Leaderboard.topic())
     id = start_match(["retry-a", "retry-b"])
     other = start_match(["live-a", "live-b"])
+
     Repo.query!("""
     CREATE FUNCTION arena_test_fail_result() RETURNS trigger AS $$
     BEGIN IF NEW.guest_id = 'retry-a' THEN RAISE EXCEPTION 'temporary test failure'; END IF; RETURN NEW; END;
     $$ LANGUAGE plpgsql
     """)
-    Repo.query!("CREATE TRIGGER arena_test_fail BEFORE INSERT ON players FOR EACH ROW EXECUTE FUNCTION arena_test_fail_result()")
+
+    Repo.query!(
+      "CREATE TRIGGER arena_test_fail BEFORE INSERT ON players FOR EACH ROW EXECUTE FUNCTION arena_test_fail_result()"
+    )
+
     assert :ok = Match.leave(id, "retry-b")
     assert :ok = Match.tick(id)
     assert_receive {[:arena, :result_writer, :retry], ^id}, 5_000
-    assert Enum.any?(MatchStore.pending_results(), fn {_pending_id, pending} -> pending.match_id == id end)
+
+    assert Enum.any?(MatchStore.pending_results(), fn {_pending_id, pending} ->
+             pending.match_id == id
+           end)
+
     refute Repo.get_by(MatchResult, match_id: id)
     {elapsed_us, :ok} = :timer.tc(fn -> Match.tick(other) end)
     assert elapsed_us < 1_000_000

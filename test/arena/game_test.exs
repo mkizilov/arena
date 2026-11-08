@@ -56,7 +56,9 @@ defmodule Arena.GameTest do
     refute next.snakes.a.alive
     assert Game.tick(next, %{}) == {next, []}
 
-    state = game(a: snake([{5, 5}, {5, 6}, {6, 6}, {6, 5}, {7, 5}], :up), b: snake([{20, 5}], :right))
+    state =
+      game(a: snake([{5, 5}, {5, 6}, {6, 6}, {6, 5}, {7, 5}], :up), b: snake([{20, 5}], :right))
+
     {next, _} = Game.tick(state, %{a: :right})
     refute next.snakes.a.alive
   end
@@ -117,7 +119,9 @@ defmodule Arena.GameTest do
   end
 
   test "food and power-up consumed on the same tick respawn in distinct free cells" do
-    state = game([a: snake([{5, 5}, {4, 5}], :right), b: snake([{20, 5}, {19, 5}], :right)], {6, 5})
+    state =
+      game([a: snake([{5, 5}, {4, 5}], :right), b: snake([{20, 5}, {19, 5}], :right)], {6, 5})
+
     state = %{state | power_up: {21, 5}}
     {next, events} = Game.tick(state, %{})
     assert {:ate, :a, {6, 5}} in events
@@ -155,8 +159,11 @@ defmodule Arena.GameTest do
   property "random input sequences preserve invariants and replay deterministically" do
     direction = member_of([:up, :down, :left, :right])
 
-    check all seed <- tuple({integer(1..100_000), integer(1..100_000), integer(1..100_000)}),
-              inputs <- list_of(fixed_map(%{a: direction, b: direction, c: direction}), max_length: 100) do
+    check all(
+            seed <- tuple({integer(1..100_000), integer(1..100_000), integer(1..100_000)}),
+            inputs <-
+              list_of(fixed_map(%{a: direction, b: direction, c: direction}), max_length: 100)
+          ) do
       initial = Game.new([:a, :b, :c], seed)
 
       {final, _, _} =
@@ -164,11 +171,17 @@ defmodule Arena.GameTest do
           {next, events} = Game.tick(state, input)
           assert {next, events} == Game.tick(replay, input)
 
-          counts = Enum.reduce(events, counts, fn
-            {:ate, id, _}, acc -> Map.update(acc, id, {1, 0}, fn {food, powers} -> {food + 1, powers} end)
-            {:power_up_collected, id, _}, acc -> Map.update(acc, id, {0, 1}, fn {food, powers} -> {food, powers + 1} end)
-            _, acc -> acc
-          end)
+          counts =
+            Enum.reduce(events, counts, fn
+              {:ate, id, _}, acc ->
+                Map.update(acc, id, {1, 0}, fn {food, powers} -> {food + 1, powers} end)
+
+              {:power_up_collected, id, _}, acc ->
+                Map.update(acc, id, {0, 1}, fn {food, powers} -> {food, powers + 1} end)
+
+              _, acc ->
+                acc
+            end)
 
           live_cells =
             next.snakes
@@ -187,7 +200,10 @@ defmodule Arena.GameTest do
           {next, next, counts}
         end)
 
-      assert final == Enum.reduce(inputs, initial, fn input, state -> elem(Game.tick(state, input), 0) end)
+      assert final ==
+               Enum.reduce(inputs, initial, fn input, state ->
+                 elem(Game.tick(state, input), 0)
+               end)
     end
   end
 end

@@ -7,8 +7,8 @@ defmodule Arena.Leaderboard do
 
   def topic, do: "leaderboard"
 
-  def top(:wins), do: ranked([desc: :wins, desc: :best_score, asc: :player_id])
-  def top(:best_score), do: ranked([desc: :best_score, desc: :wins, asc: :player_id])
+  def top(:wins), do: ranked(desc: :wins, desc: :best_score, asc: :player_id)
+  def top(:best_score), do: ranked(desc: :best_score, desc: :wins, asc: :player_id)
 
   defp ranked(order) do
     Repo.all(

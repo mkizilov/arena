@@ -2,7 +2,18 @@ defmodule ArenaLoad.Stats do
   @moduledoc "Bounded, concurrent counters and latency buckets for the load generator."
 
   @bounds [1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 30_000]
-  @indices %{connected: 1, lobby_joins: 2, match_joins: 3, ticks: 4, inputs: 5, disconnects: 6, errors: 7, invalid_latency: 8, online: 9, matched_bots: 10}
+  @indices %{
+    connected: 1,
+    lobby_joins: 2,
+    match_joins: 3,
+    ticks: 4,
+    inputs: 5,
+    disconnects: 6,
+    errors: 7,
+    invalid_latency: 8,
+    online: 9,
+    matched_bots: 10
+  }
   @offset 11
 
   def new, do: :counters.new(@offset + length(@bounds) + 1, [:write_concurrency])
@@ -25,6 +36,7 @@ defmodule ArenaLoad.Stats do
     Map.new(before, fn
       {:latency_buckets, buckets} ->
         {:latency_buckets, Enum.zip_with(after_sample.latency_buckets, buckets, &(&1 - &2))}
+
       {key, value} ->
         {key, Map.fetch!(after_sample, key) - value}
     end)
@@ -38,9 +50,12 @@ defmodule ArenaLoad.Stats do
     else
       rank = max(ceil(total * quantile), 1)
       bounds = @bounds ++ ["+Inf"]
+
       Enum.zip(bounds, buckets)
       |> Enum.reduce_while(0, fn {bound, count}, cumulative ->
-        if cumulative + count >= rank, do: {:halt, {:value, bound}}, else: {:cont, cumulative + count}
+        if cumulative + count >= rank,
+          do: {:halt, {:value, bound}},
+          else: {:cont, cumulative + count}
       end)
       |> elem(1)
     end

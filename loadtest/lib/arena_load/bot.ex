@@ -16,14 +16,28 @@ defmodule ArenaLoad.Bot do
     uri = "ws://127.0.0.1:#{port}/socket/websocket?#{query}"
     rng = :rand.seed_s(:exsss, {number + 1, number + 13, number + 97})
 
-    socket = new_socket() |> assign(%{
-      stats: stats, player: Keyword.fetch!(opts, :player), rng: rng,
-      topic: nil, direction: "right", alive: false, phase: "waiting", online: false, matched: false, queue_ref: nil
-    })
+    socket =
+      new_socket()
+      |> assign(%{
+        stats: stats,
+        player: Keyword.fetch!(opts, :player),
+        rng: rng,
+        topic: nil,
+        direction: "right",
+        alive: false,
+        phase: "waiting",
+        online: false,
+        matched: false,
+        queue_ref: nil
+      })
 
     case connect(socket, uri: uri) do
-      {:ok, socket} -> {:ok, socket, {:continue, :start}}
-      {:error, reason} -> Stats.add(stats, :errors); {:stop, reason}
+      {:ok, socket} ->
+        {:ok, socket, {:continue, :start}}
+
+      {:error, reason} ->
+        Stats.add(stats, :errors)
+        {:stop, reason}
     end
   end
 
@@ -49,7 +63,13 @@ defmodule ArenaLoad.Bot do
   def handle_join("match:" <> _id, reply, socket) do
     Stats.add(socket.assigns.stats, :match_joins)
     if not socket.assigns.matched, do: Stats.add(socket.assigns.stats, :matched_bots)
-    socket = socket |> assign(:matched, true) |> assign(:phase, reply["phase"]) |> apply_snapshot(reply["state"])
+
+    socket =
+      socket
+      |> assign(:matched, true)
+      |> assign(:phase, reply["phase"])
+      |> apply_snapshot(reply["state"])
+
     {:ok, socket}
   end
 
@@ -67,14 +87,22 @@ defmodule ArenaLoad.Bot do
   end
 
   def handle_message(topic, "status", %{"phase" => phase}, socket) do
-    if topic == socket.assigns.topic, do: {:ok, assign(socket, :phase, phase)}, else: {:ok, socket}
+    if topic == socket.assigns.topic,
+      do: {:ok, assign(socket, :phase, phase)},
+      else: {:ok, socket}
   end
 
   def handle_message(topic, event, payload, socket) when event in ["state", "delta"] do
     if topic == socket.assigns.topic do
       socket = record_tick(socket, payload)
-      socket = if event == "state", do: apply_snapshot(socket, payload["state"]), else: apply_delta(socket, payload)
-      result = if event == "state", do: get_in(payload, ["state", "result"]), else: payload["result"]
+
+      socket =
+        if event == "state",
+          do: apply_snapshot(socket, payload["state"]),
+          else: apply_delta(socket, payload)
+
+      result =
+        if event == "state", do: get_in(payload, ["state", "result"]), else: payload["result"]
 
       if result do
         socket = socket |> leave(topic) |> assign(:topic, nil) |> assign(:alive, false)
@@ -96,6 +124,7 @@ defmodule ArenaLoad.Bot do
       Stats.add(socket.assigns.stats, :errors)
       Process.send_after(self(), :queue, 1_000)
     end
+
     {:ok, socket}
   end
 
@@ -105,16 +134,19 @@ defmodule ArenaLoad.Bot do
   def handle_info(:move, socket) do
     Process.send_after(self(), :move, 250)
 
-    socket = if socket.assigns.topic && socket.assigns.alive && socket.assigns.phase == "running" do
-      {direction, rng} = next_direction(socket.assigns.direction, socket.assigns.rng)
-      case push(socket, socket.assigns.topic, "input", %{direction: direction}) do
-        {:ok, _ref} -> Stats.add(socket.assigns.stats, :inputs)
-        {:error, _} -> :ok
+    socket =
+      if socket.assigns.topic && socket.assigns.alive && socket.assigns.phase == "running" do
+        {direction, rng} = next_direction(socket.assigns.direction, socket.assigns.rng)
+
+        case push(socket, socket.assigns.topic, "input", %{direction: direction}) do
+          {:ok, _ref} -> Stats.add(socket.assigns.stats, :inputs)
+          {:error, _} -> :ok
+        end
+
+        socket |> assign(:rng, rng) |> assign(:direction, direction)
+      else
+        socket
       end
-      socket |> assign(:rng, rng) |> assign(:direction, direction)
-    else
-      socket
-    end
 
     {:noreply, socket}
   end
@@ -124,6 +156,7 @@ defmodule ArenaLoad.Bot do
     Stats.add(socket.assigns.stats, :disconnects)
     if socket.assigns.online, do: Stats.add(socket.assigns.stats, :online, -1)
     socket = socket |> assign(:online, false) |> assign(:topic, nil) |> assign(:alive, false)
+
     case reconnect(socket) do
       {:ok, socket} -> {:ok, socket}
       {:error, reason} -> {:stop, reason, socket}
@@ -162,8 +195,11 @@ defmodule ArenaLoad.Bot do
 
   defp apply_snapshot(socket, %{"snakes" => snakes}) do
     case Map.get(snakes, socket.assigns.player) do
-      %{"direction" => direction, "alive" => alive} -> socket |> assign(:direction, direction) |> assign(:alive, alive)
-      _ -> socket
+      %{"direction" => direction, "alive" => alive} ->
+        socket |> assign(:direction, direction) |> assign(:alive, alive)
+
+      _ ->
+        socket
     end
   end
 
@@ -171,17 +207,21 @@ defmodule ArenaLoad.Bot do
 
   defp apply_delta(socket, payload) do
     player = socket.assigns.player
-    socket = case get_in(payload, ["moves", player, "direction"]) do
-      nil -> socket
-      direction -> assign(socket, :direction, direction)
-    end
+
+    socket =
+      case get_in(payload, ["moves", player, "direction"]) do
+        nil -> socket
+        direction -> assign(socket, :direction, direction)
+      end
 
     if player in Map.get(payload, "deaths", []), do: assign(socket, :alive, false), else: socket
   end
 
   @doc false
   def next_direction(current, rng) do
-    turns = if current in ["up", "down"], do: [current, "left", "right"], else: [current, "up", "down"]
+    turns =
+      if current in ["up", "down"], do: [current, "left", "right"], else: [current, "up", "down"]
+
     {choice, rng} = :rand.uniform_s(length(turns), rng)
     {Enum.at(turns, choice - 1), rng}
   end

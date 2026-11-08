@@ -15,7 +15,8 @@ defmodule Arena.Matchmaker do
   def start_match(id, opts \\ []), do: Match.start_match(id, opts)
 
   @doc "Queues the calling process for quick play under a unique player ID."
-  def quick_play(player, server \\ __MODULE__), do: GenServer.call(server, {:queue, player, self()}, 30_000)
+  def quick_play(player, server \\ __MODULE__),
+    do: GenServer.call(server, {:queue, player, self()}, 30_000)
 
   @doc "Removes the caller's player from the queue."
   def cancel(player, server \\ __MODULE__), do: GenServer.call(server, {:cancel, player, self()})
@@ -52,7 +53,8 @@ defmodule Arena.Matchmaker do
 
   @impl true
   def init(opts) do
-    {:ok, %{queue: [], deadline: nil, timer: nil, clock: Keyword.get(opts, :clock, :system), now: 0}}
+    {:ok,
+     %{queue: [], deadline: nil, timer: nil, clock: Keyword.get(opts, :clock, :system), now: 0}}
   end
 
   @impl true

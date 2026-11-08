@@ -22,7 +22,11 @@ defmodule Arena.MatchStateTest do
     assert from_zero.game.food == old.game.food
     assert from_zero.game.power_up != nil
     assert from_zero.game.power_up != old.game.food
-    refute from_zero.game.power_up in Enum.flat_map(from_zero.game.snakes, fn {_id, snake} -> :queue.to_list(snake.body) end)
+
+    refute from_zero.game.power_up in Enum.flat_map(from_zero.game.snakes, fn {_id, snake} ->
+             :queue.to_list(snake.body)
+           end)
+
     assert from_zero.published_game.power_up == nil
     assert from_zero.published_game.rng == old.published_game.rng
     assert {:ok, ^from_zero} = MatchState.upgrade(from_zero)
@@ -38,7 +42,10 @@ defmodule Arena.MatchStateTest do
     assert migrated.game.power_up == nil
     assert {:error, {:unsupported_match_state_version, 3}} = MatchState.upgrade(%{version: 3})
     assert {:error, :invalid_match_state} = MatchState.upgrade(%{version: 1})
-    assert {:error, :invalid_game_state} = MatchState.upgrade(%{version: 1, game: :invalid, published_game: nil})
+
+    assert {:error, :invalid_game_state} =
+             MatchState.upgrade(%{version: 1, game: :invalid, published_game: nil})
+
     assert {:error, :unsupported_downgrade} = Match.code_change({:down, "2"}, old, [])
   end
 
@@ -55,15 +62,20 @@ defmodule Arena.MatchStateTest do
   test "code_change migrates a suspended running match and it continues ticking" do
     id = "upgrade-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
-    {:ok, pid} = Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
+
+    {:ok, pid} =
+      Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
+
     on_exit(fn ->
       case Horde.Registry.lookup(Arena.MatchRegistry, id) do
         [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
+
     assert_receive {:match_status, ^id, :running, _}, 1_000
     assert :ok = Match.tick(id)
+
     :sys.replace_state(pid, fn state ->
       state
       |> Map.delete(:version)
@@ -72,6 +84,7 @@ defmodule Arena.MatchStateTest do
     end)
 
     :ok = :sys.suspend(pid)
+
     try do
       assert :ok = :sys.change_code(pid, Match, :unversioned, [])
     after
@@ -89,18 +102,27 @@ defmodule Arena.MatchStateTest do
   test "a restored unversioned checkpoint is migrated before the next tick" do
     id = "upgrade-recovery-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
-    {:ok, pid} = Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
+
+    {:ok, pid} =
+      Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
+
     on_exit(fn ->
       case Horde.Registry.lookup(Arena.MatchRegistry, id) do
         [{_, _}] -> Match.stop(id)
         [] -> :ok
       end
     end)
+
     assert_receive {:match_status, ^id, :running, _}, 1_000
     assert :ok = Match.tick(id)
     {:ok, saved} = Arena.MatchStore.get(id)
-    saved = saved |> Map.delete(:version) |> Map.update!(:game, &Map.delete(&1, :power_up))
+
+    saved =
+      saved
+      |> Map.delete(:version)
+      |> Map.update!(:game, &Map.delete(&1, :power_up))
       |> Map.update!(:published_game, &Map.delete(&1, :power_up))
+
     assert :ok = Arena.MatchStore.put(id, saved)
     Process.exit(pid, :kill)
     assert_receive {:match_recovered, ^id, new_pid}, 2_000

@@ -23,7 +23,11 @@ defmodule Arena.MatchState do
          {:ok, published} <- Map.fetch(state, :published_game),
          {:ok, game} <- migrate_game(game),
          {:ok, published} <- normalize_game(published) do
-      {:ok, state |> Map.put(:game, game) |> Map.put(:published_game, published) |> Map.put(:version, 2)}
+      {:ok,
+       state
+       |> Map.put(:game, game)
+       |> Map.put(:published_game, published)
+       |> Map.put(:version, 2)}
     else
       :error -> {:error, :invalid_match_state}
       {:error, reason} -> {:error, reason}

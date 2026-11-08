@@ -36,7 +36,9 @@ defmodule Arena.ResultWriter do
     jobs =
       Arena.MatchStore.pending_results()
       |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.reject(fn {id, _} -> MapSet.member?(running_ids, id) or MapSet.member?(state.cooling, id) end)
+      |> Enum.reject(fn {id, _} ->
+        MapSet.member?(running_ids, id) or MapSet.member?(state.cooling, id)
+      end)
       |> Enum.take(slots)
 
     state = Enum.reduce(jobs, state, fn {id, result}, acc -> start_task(acc, id, result) end)
@@ -56,7 +58,13 @@ defmodule Arena.ResultWriter do
         state =
           case result do
             {:ok, outcome} when outcome in [:inserted, :duplicate] ->
-              :ok = Phoenix.PubSub.broadcast(Arena.PubSub, "leaderboard", {:leaderboard_updated, job.match_id})
+              :ok =
+                Phoenix.PubSub.broadcast(
+                  Arena.PubSub,
+                  "leaderboard",
+                  {:leaderboard_updated, job.match_id}
+                )
+
               :ok = Arena.MatchStore.complete_result(id)
               %{state | failures: Map.delete(state.failures, id)}
 
@@ -74,7 +82,9 @@ defmodule Arena.ResultWriter do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     case Map.pop(state.running, ref) do
-      {nil, _} -> {:noreply, state}
+      {nil, _} ->
+        {:noreply, state}
+
       {job, running} ->
         state = retry(%{state | running: running}, job.id, job.match_id, reason)
         send(self(), :drain)
@@ -88,10 +98,15 @@ defmodule Arena.ResultWriter do
   end
 
   defp start_task(state, id, result) do
-    try do
-      task = Task.Supervisor.async_nolink(Arena.TaskSupervisor, fn ->
+    task =
+      Task.Supervisor.async_nolink(Arena.TaskSupervisor, fn ->
         Logger.metadata(match_id: result.match_id)
-        :telemetry.execute([:arena, :result_writer, :start], %{system_time: System.system_time()}, %{match_id: result.match_id, result_id: id})
+
+        :telemetry.execute(
+          [:arena, :result_writer, :start],
+          %{system_time: System.system_time()},
+          %{match_id: result.match_id, result_id: id}
+        )
 
         try do
           Arena.Results.record(result)
@@ -102,18 +117,31 @@ defmodule Arena.ResultWriter do
         end
       end)
 
-      %{state | running: Map.put(state.running, task.ref, %{id: id, match_id: result.match_id})}
-    catch
-      :exit, reason -> retry(state, id, result.match_id, reason)
-    end
+    %{state | running: Map.put(state.running, task.ref, %{id: id, match_id: result.match_id})}
+  catch
+    :exit, reason -> retry(state, id, result.match_id, reason)
   end
 
   defp retry(state, id, match_id, reason) do
     count = Map.get(state.failures, id, 0) + 1
     delay = min(1_000 * Integer.pow(2, min(count - 1, 5)), @max_delay)
-    Logger.warning("result persistence failed for #{inspect(id)}; retrying in #{delay}ms: #{inspect(reason)}", match_id: match_id)
-    :telemetry.execute([:arena, :result_writer, :retry], %{delay_ms: delay}, %{match_id: match_id, result_id: id})
+
+    Logger.warning(
+      "result persistence failed for #{inspect(id)}; retrying in #{delay}ms: #{inspect(reason)}",
+      match_id: match_id
+    )
+
+    :telemetry.execute([:arena, :result_writer, :retry], %{delay_ms: delay}, %{
+      match_id: match_id,
+      result_id: id
+    })
+
     Process.send_after(self(), {:retry, id}, delay)
-    %{state | cooling: MapSet.put(state.cooling, id), failures: Map.put(state.failures, id, count)}
+
+    %{
+      state
+      | cooling: MapSet.put(state.cooling, id),
+        failures: Map.put(state.failures, id, count)
+    }
   end
 end

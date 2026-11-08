@@ -7,11 +7,14 @@ defmodule Arena.ClusterTest do
   @tag timeout: 120_000
   test "three nodes distribute matches and resume them after a node stops" do
     unless Node.alive?() and System.get_env("ERL_EPMD_PORT") == "22351" do
-      flunk("start this test in a loopback-only distributed VM with ERL_EPMD_PORT=22351; see DESIGN.md")
+      flunk(
+        "start this test in a loopback-only distributed VM with ERL_EPMD_PORT=22351; see DESIGN.md"
+      )
     end
 
     peers = for _ <- 1..2, do: start_peer()
     nodes = Enum.map(peers, &elem(&1, 1))
+
     Enum.each(nodes, fn n ->
       Enum.each(nodes -- [n], fn other -> :erpc.call(n, Node, :connect, [other]) end)
     end)
@@ -21,18 +24,23 @@ defmodule Arena.ClusterTest do
         length(Horde.Cluster.members(Arena.MatchRegistry)) == 3
     end)
 
-    ids = for _ <- 1..18 do
-      id = "cluster-#{System.unique_integer([:positive, :monotonic])}"
-      {:ok, _pid} = Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
-      on_exit(fn ->
-        try do
-          if Horde.Registry.lookup(Arena.MatchRegistry, id) != [], do: Match.stop(id)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-      id
-    end
+    ids =
+      for _ <- 1..18 do
+        id = "cluster-#{System.unique_integer([:positive, :monotonic])}"
+
+        {:ok, _pid} =
+          Match.start_match(id, players: [:a, :b], seed: {1, 2, 3}, countdown_ms: 0, manual: true)
+
+        on_exit(fn ->
+          try do
+            if Horde.Registry.lookup(Arena.MatchRegistry, id) != [], do: Match.stop(id)
+          catch
+            :exit, _ -> :ok
+          end
+        end)
+
+        id
+      end
 
     Enum.each(ids, fn id ->
       eventually(fn ->
@@ -42,16 +50,25 @@ defmodule Arena.ClusterTest do
           :exit, _ -> false
         end
       end)
+
       for _ <- 1..3, do: assert(:ok = Match.tick(id))
     end)
 
-    placements = Map.new(ids, fn id ->
-      [{pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
-      {id, {pid, Match.snapshot(id).game}}
-    end)
-    assert placements |> Map.values() |> Enum.map(fn {pid, _} -> node(pid) end) |> Enum.uniq() |> length() >= 2
+    placements =
+      Map.new(ids, fn id ->
+        [{pid, _}] = Horde.Registry.lookup(Arena.MatchRegistry, id)
+        {id, {pid, Match.snapshot(id).game}}
+      end)
 
-    victim = Enum.find(nodes, fn n -> Enum.any?(placements, fn {_id, {pid, _}} -> node(pid) == n end) end)
+    assert placements
+           |> Map.values()
+           |> Enum.map(fn {pid, _} -> node(pid) end)
+           |> Enum.uniq()
+           |> length() >= 2
+
+    victim =
+      Enum.find(nodes, fn n -> Enum.any?(placements, fn {_id, {pid, _}} -> node(pid) == n end) end)
+
     assert victim
     affected = Enum.filter(placements, fn {_id, {pid, _}} -> node(pid) == victim end)
     assert affected != []
@@ -59,9 +76,10 @@ defmodule Arena.ClusterTest do
     Enum.each(affected, fn {id, {_pid, game}} ->
       saved = :erpc.call(victim, Arena.MatchStore, :get, [id])
       assert {:ok, %{result_id: instance}} = saved
-      assert Enum.any?(([node() | nodes] -- [victim]), fn n ->
-        match?({:ok, %{state: %{game: ^game}}}, Arena.MatchReplica.get(n, id, instance))
-      end)
+
+      assert Enum.any?([node() | nodes] -- [victim], fn n ->
+               match?({:ok, %{state: %{game: ^game}}}, Arena.MatchReplica.get(n, id, instance))
+             end)
     end)
 
     {peer, ^victim} = Enum.find(peers, fn {_peer, n} -> n == victim end)
@@ -78,9 +96,12 @@ defmodule Arena.ClusterTest do
             catch
               :exit, _ -> false
             end
-          _ -> false
+
+          _ ->
+            false
         end
       end)
+
       assert :ok = Match.tick(id)
       assert Match.snapshot(id).game.tick == game.tick + 1
     end)
@@ -89,11 +110,32 @@ defmodule Arena.ClusterTest do
   defp start_peer do
     name = :"arena_peer_#{System.unique_integer([:positive, :monotonic])}"
     cookie = Node.get_cookie() |> Atom.to_charlist()
-    args = [~c"+S", ~c"1:1", ~c"-setcookie", cookie, ~c"-kernel",
-      ~c"inet_dist_use_interface", ~c"{127,0,0,1}",
-      ~c"inet_dist_listen_min", ~c"22352", ~c"inet_dist_listen_max", ~c"22359"]
-    {:ok, peer, node} = :peer.start_link(%{name: name, host: ~c"127.0.0.1", longnames: true, connection: :standard_io, args: args})
+
+    args = [
+      ~c"+S",
+      ~c"1:1",
+      ~c"-setcookie",
+      cookie,
+      ~c"-kernel",
+      ~c"inet_dist_use_interface",
+      ~c"{127,0,0,1}",
+      ~c"inet_dist_listen_min",
+      ~c"22352",
+      ~c"inet_dist_listen_max",
+      ~c"22359"
+    ]
+
+    {:ok, peer, node} =
+      :peer.start_link(%{
+        name: name,
+        host: ~c"127.0.0.1",
+        longnames: true,
+        connection: :standard_io,
+        args: args
+      })
+
     Process.unlink(peer)
+
     on_exit(fn ->
       if Process.alive?(peer) do
         try do
@@ -103,19 +145,30 @@ defmodule Arena.ClusterTest do
         end
       end
     end)
+
     assert Node.connect(node)
     :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
     :erpc.call(node, Application, :load, [:arena])
-    for app <- [:arena, :phoenix, :logger, :prom_ex], {key, value} <- Application.get_all_env(app) do
+
+    for app <- [:arena, :phoenix, :logger, :prom_ex],
+        {key, value} <- Application.get_all_env(app) do
       :erpc.call(node, Application, :put_env, [app, key, value])
     end
+
     {:ok, _} = :erpc.call(node, Application, :ensure_all_started, [:arena], 30_000)
     {peer, node}
   end
 
   defp eventually(fun, attempts \\ 200)
   defp eventually(_fun, 0), do: flunk("cluster did not converge before the deadline")
+
   defp eventually(fun, attempts) do
-    if fun.(), do: :ok, else: (Process.sleep(50); eventually(fun, attempts - 1))
+    if fun.(),
+      do: :ok,
+      else:
+        (
+          Process.sleep(50)
+          eventually(fun, attempts - 1)
+        )
   end
 end

@@ -12,7 +12,9 @@ defmodule ArenaWeb.UserSocket do
       {:ok, guest} ->
         Logger.metadata(player_id: guest.id)
         {:ok, socket |> assign(:guest, guest) |> assign(:guest_token, token)}
-      {:error, _} -> :error
+
+      {:error, _} ->
+        :error
     end
   end
 

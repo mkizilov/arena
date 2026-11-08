@@ -1,6 +1,6 @@
 defmodule ArenaWeb.LoadtestControllerTest do
   use ExUnit.Case, async: true
-  use Plug.Test
+  import Plug.Test
 
   test "measurement endpoint reports VM and match memory only on loopback" do
     local = %{conn(:get, "/loadtest/measurements") | remote_ip: {127, 0, 0, 1}}

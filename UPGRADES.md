@@ -2,7 +2,7 @@
 
 ## Status
 
-The live release demonstration has **not been run** in this environment: Erlang/OTP, Elixir/Mix and PostgreSQL are unavailable, and shell DNS cannot resolve Hex. The tests in `test/arena/match_state_test.exs` include direct migrations and a simulated `:sys.change_code` on a running process, but they also remain unverified here. No live-upgrade result or timing is claimed.
+The live release demonstration has **not been run** in this environment. DNS access was repaired and pinned Erlang/OTP, Elixir/Mix and PostgreSQL were installed project-locally. The tests in `test/arena/match_state_test.exs`, including direct migrations and simulated `:sys.change_code` on a running process, passed in the full suite. No live-upgrade result or timing is claimed.
 
 ## Version contract
 
@@ -16,7 +16,7 @@ The new purple power-up awards five points without growing the snake. It is cons
 
 This procedure is intended for an **isolated, single-node, disposable** project-local release and database, with no real users or other matches. It briefly suspends the match process; it is not a zero-pause upgrade. Do not run it in a multi-node cluster or against a shared database. The exact steps remain unverified until the required local toolchain is available.
 
-1. Generate a `mix.lock` from the current source with `MIX_ENV=prod mix deps.get`. Export the pre-upgrade source from commit `c1def9a` into a new directory under `.agent-local/`, copy that same `mix.lock` into it, run `MIX_ENV=prod mix deps.get`, and build its release with `MIX_ENV=prod mix release`. For example, from the repository root, after confirming the destination is new:
+1. Use the committed `mix.lock` and run `MIX_ENV=prod mix deps.get --locked`. Export the pre-upgrade source from commit `c1def9a` into a new directory under `.agent-local/`, copy that same `mix.lock` into it, run `MIX_ENV=prod mix deps.get --locked`, and build its release with `MIX_ENV=prod mix release`. For example, from the repository root, after confirming the destination is new:
 
    ```sh
    mkdir -p .agent-local/upgrade-v1-src

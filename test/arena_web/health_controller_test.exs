@@ -1,8 +1,9 @@
 defmodule ArenaWeb.HealthControllerTest do
   use ExUnit.Case, async: false
-  use Plug.Test
+  import Plug.Test
 
   alias Arena.{Health, Repo}
+  alias Ecto.Adapters.SQL.Sandbox
 
   test "liveness is available without querying the database" do
     response = conn(:get, "/healthz") |> ArenaWeb.Endpoint.call([])
@@ -11,13 +12,16 @@ defmodule ArenaWeb.HealthControllerTest do
   end
 
   test "readiness checks the sandbox database and local Horde membership" do
-    owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Repo, shared: true)
-    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+    owner = Sandbox.start_owner!(Repo, shared: true)
+    on_exit(fn -> Sandbox.stop_owner(owner) end)
     response = conn(:get, "/readyz") |> ArenaWeb.Endpoint.call([])
     assert response.status == 200
+
     assert Jason.decode!(response.resp_body) == %{
-      "status" => "ready", "checks" => %{"database" => true, "cluster" => true}
-    }
+             "status" => "ready",
+             "checks" => %{"database" => true, "cluster" => true}
+           }
+
     assert Plug.Conn.get_resp_header(response, "cache-control") == ["no-store"]
   end
 
@@ -30,7 +34,15 @@ defmodule ArenaWeb.HealthControllerTest do
     assert Health.cluster_ready?(current, connected, registry, supervisor, 2)
     refute Health.cluster_ready?(current, [current], registry, supervisor, 2)
     refute Health.cluster_ready?(current, connected, registry, [hd(supervisor)], 2)
-    refute Health.cluster_ready?(current, connected, [{:wrong_registry, current}, {:wrong_registry, other}], supervisor, 2)
+
+    refute Health.cluster_ready?(
+             current,
+             connected,
+             [{:wrong_registry, current}, {:wrong_registry, other}],
+             supervisor,
+             2
+           )
+
     refute Health.ready?(%{database: false, cluster: true})
     refute Health.ready?(%{database: true, cluster: false})
     assert Health.ready?(%{database: true, cluster: true})

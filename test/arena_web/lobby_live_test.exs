@@ -35,6 +35,7 @@ defmodule ArenaWeb.LobbyLiveTest do
   test "creates and joins a private room through the lobby" do
     {host, conn} = guest_conn()
     {:ok, view, _html} = live(conn, "/lobby")
+
     assert {:error, {:live_redirect, %{to: "/matches/room-" <> code}}} =
              render_click(view, "create_private")
 
@@ -43,6 +44,7 @@ defmodule ArenaWeb.LobbyLiveTest do
     assert Match.snapshot(id).players == [host.id]
     {guest, other_conn} = guest_conn()
     {:ok, other, _html} = live(other_conn, "/lobby")
+
     assert {:error, {:live_redirect, %{to: "/matches/room-" <> ^code}}} =
              render_submit(other, "join_private", %{"code" => String.downcase(code)})
 
@@ -58,6 +60,7 @@ defmodule ArenaWeb.LobbyLiveTest do
     {:ok, view, html} = live(conn, "/lobby")
     assert html =~ id
     assert html =~ "0/8"
+
     assert {:error, {:live_redirect, %{to: "/matches/" <> ^id}}} =
              render_click(view, "join_open", %{"id" => id})
 

@@ -6,10 +6,12 @@ defmodule ArenaWeb.ObservabilityPage do
   def menu_link(_session, _capabilities), do: {:ok, "Arena"}
 
   @impl true
-  def mount(_params, _session, socket), do: {:ok, assign(socket, :arena, Arena.Observability.snapshot())}
+  def mount(_params, _session, socket),
+    do: {:ok, assign(socket, :arena, Arena.Observability.snapshot())}
 
   @impl true
-  def handle_refresh(socket), do: {:noreply, assign(socket, :arena, Arena.Observability.snapshot())}
+  def handle_refresh(socket),
+    do: {:noreply, assign(socket, :arena, Arena.Observability.snapshot())}
 
   @impl true
   def render(assigns) do

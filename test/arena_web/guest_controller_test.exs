@@ -1,6 +1,6 @@
 defmodule ArenaWeb.GuestControllerTest do
   use ExUnit.Case, async: true
-  use Plug.Test
+  import Plug.Test
 
   test "issues a guest token, preserves a valid identity, and replaces a bad token" do
     first = conn(:get, "/guest") |> ArenaWeb.Endpoint.call([])
@@ -45,7 +45,10 @@ defmodule ArenaWeb.GuestControllerTest do
         ] do
       response = conn(:get, path) |> ArenaWeb.Endpoint.call([])
       assert response.status == 200
-      assert Plug.Conn.get_resp_header(response, "content-type") == ["text/javascript; charset=utf-8"]
+
+      assert Plug.Conn.get_resp_header(response, "content-type") == [
+               "text/javascript; charset=utf-8"
+             ]
     end
 
     assert (conn(:get, "/assets/game/other.mjs") |> ArenaWeb.Endpoint.call([])).status == 404

@@ -51,7 +51,9 @@ defmodule Arena.MatchmakerTest do
     assert %{players: [:a, :b], phase: :countdown} = Match.snapshot(id)
   end
 
-  test "one player remains queued past the deadline and a second starts the match", %{server: server} do
+  test "one player remains queued past the deadline and a second starts the match", %{
+    server: server
+  } do
     assert :ok = Matchmaker.quick_play(:a, server)
     assert :ok = Matchmaker.advance(server, 20_000)
     assert Matchmaker.queued(server) == [:a]
@@ -86,7 +88,9 @@ defmodule Arena.MatchmakerTest do
     refute_receive {:match_found, _, _}, 20
   end
 
-  test "duplicate queue IDs and cancellation are handled without retaining a timer", %{server: server} do
+  test "duplicate queue IDs and cancellation are handled without retaining a timer", %{
+    server: server
+  } do
     assert :ok = Matchmaker.quick_play(:a, server)
     assert {:error, :already_queued} = Matchmaker.quick_play(:a, server)
     assert :ok = Matchmaker.cancel(:a, server)

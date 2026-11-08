@@ -30,32 +30,40 @@ defmodule Arena.Lobby do
   end
 
   defp discover(matches) do
-    Enum.reduce(
-      Arena.MatchSupervisor
-      |> Horde.DynamicSupervisor.which_children(), matches, fn
-        {_, pid, _, _}, matches when is_pid(pid) ->
-          case Horde.Registry.keys(Arena.MatchRegistry, pid) do
-            [id] ->
-              case Map.get(matches, id) do
-                %{pid: ^pid} -> matches
-                existing ->
-                  if existing, do: Process.demonitor(existing.ref, [:flush])
-                  if not existing, do: Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
-                  Map.put(matches, id, track(pid))
-              end
+    Arena.MatchSupervisor
+    |> Horde.DynamicSupervisor.which_children()
+    |> Enum.reduce(matches, &discover_child/2)
+  end
 
-            [] ->
-              matches
-          end
+  defp discover_child({_, pid, _, _}, matches) when is_pid(pid) do
+    case Horde.Registry.keys(Arena.MatchRegistry, pid) do
+      [id] -> track_discovered(matches, id, pid)
+      [] -> matches
+    end
+  end
 
-        _, matches ->
-          matches
-      end)
+  defp discover_child(_, matches), do: matches
+
+  defp track_discovered(matches, id, pid) do
+    case Map.get(matches, id) do
+      %{pid: ^pid} ->
+        matches
+
+      existing ->
+        if existing, do: Process.demonitor(existing.ref, [:flush])
+        if is_nil(existing), do: Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
+        Map.put(matches, id, track(pid))
+    end
   end
 
   @impl true
   def handle_call(:matches, _from, matches) do
-    ids = matches |> Enum.filter(fn {_, entry} -> Arena.Cluster.alive?(entry.pid) end) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+    ids =
+      matches
+      |> Enum.filter(fn {_, entry} -> Arena.Cluster.alive?(entry.pid) end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
     {:reply, ids, matches}
   end
 
@@ -67,27 +75,34 @@ defmodule Arena.Lobby do
         {:reply, {:error, {:already_started, entry.pid}}, matches}
 
       :error ->
-        :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
+        start_new_match(id, opts, matches)
+    end
+  end
 
-        result = case Horde.Registry.lookup(Arena.MatchRegistry, id) do
-          [{pid, _}] -> {:error, {:already_started, pid}}
-          [] ->
-            with :ok <- Arena.MatchStore.prepare(id, Keyword.fetch!(opts, :instance_id)) do
-              Horde.DynamicSupervisor.start_child(Arena.MatchSupervisor, {Match, {id, opts}})
-            end
-        end
+  defp start_new_match(id, opts, matches) do
+    :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
 
-        case result do
-          {:ok, pid} ->
-            matches = Map.put(matches, id, track(pid))
-            publish(matches)
-            {:reply, {:ok, pid}, matches}
+    result =
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{pid, _}] ->
+          {:error, {:already_started, pid}}
 
-          error ->
-            Arena.MatchStore.abort_prepare(id, Keyword.fetch!(opts, :instance_id))
-            Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
-            {:reply, error, matches}
-        end
+        [] ->
+          with :ok <- Arena.MatchStore.prepare(id, Keyword.fetch!(opts, :instance_id)) do
+            Horde.DynamicSupervisor.start_child(Arena.MatchSupervisor, {Match, {id, opts}})
+          end
+      end
+
+    case result do
+      {:ok, pid} ->
+        matches = Map.put(matches, id, track(pid))
+        publish(matches)
+        {:reply, {:ok, pid}, matches}
+
+      error ->
+        Arena.MatchStore.abort_prepare(id, Keyword.fetch!(opts, :instance_id))
+        Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
+        {:reply, error, matches}
     end
   end
 
@@ -103,8 +118,10 @@ defmodule Arena.Lobby do
     {:noreply, matches}
   end
 
-  def handle_info(%Phoenix.Socket.Broadcast{event: event}, matches) when event in ["delta", "state"],
-    do: {:noreply, matches}
+  def handle_info(%Phoenix.Socket.Broadcast{event: event}, matches)
+      when event in ["delta", "state"],
+      do: {:noreply, matches}
+
   def handle_info({:match_ended_unexpectedly, _id}, matches), do: {:noreply, matches}
   def handle_info({:match_recovering, _id}, matches), do: {:noreply, matches}
   def handle_info({:match_disconnected, _id, _player}, matches), do: {:noreply, matches}
@@ -113,23 +130,18 @@ defmodule Arena.Lobby do
   def handle_info({:match_registered, id, pid, kind}, matches) do
     case Map.get(matches, id) do
       %{pid: ^pid} ->
-        if kind == :recovered and node(pid) == node() do
-          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovering, id})
-          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovered, id, pid})
-        end
+        announce_recovery(kind, id, pid, true)
+
         {:noreply, matches}
 
       existing ->
         if existing, do: Process.demonitor(existing.ref, [:flush])
-        if not existing, do: Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
+        if is_nil(existing), do: Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
         matches = Map.put(matches, id, track(pid))
         publish(matches)
-        if kind == :recovered and node(pid) == node() do
-          if not existing or not existing.recovering do
-            Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovering, id})
-          end
-          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovered, id, pid})
-        end
+
+        announce_recovery(kind, id, pid, is_nil(existing) or not existing.recovering)
+
         {:noreply, matches}
     end
   end
@@ -183,32 +195,40 @@ defmodule Arena.Lobby do
     end
   end
 
-  defp track(pid), do: %{pid: pid, ref: Process.monitor(pid), snapshot: snapshot(pid), recovering: false}
+  defp announce_recovery(:recovered, id, pid, notify) when node(pid) == node() do
+    if notify,
+      do: Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovering, id})
+
+    Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovered, id, pid})
+  end
+
+  defp announce_recovery(_, _, _, _), do: :ok
+
+  defp track(pid),
+    do: %{pid: pid, ref: Process.monitor(pid), snapshot: snapshot(pid), recovering: false}
 
   defp snapshot(pid) do
-    try do
-      GenServer.call(pid, :snapshot)
-    catch
-      :exit, _reason -> nil
-    end
+    GenServer.call(pid, :snapshot)
+  catch
+    :exit, _reason -> nil
   end
 
   defp open(matches) do
     matches
-    |> Enum.flat_map(fn {id, entry} ->
-      case entry.snapshot do
-        %{visibility: :public, phase: phase, players: players}
-        when phase in [:waiting, :countdown] and length(players) < 8 ->
-          if Arena.Cluster.alive?(entry.pid),
-            do: [%{id: id, player_count: length(players), capacity: 8}],
-            else: []
-
-        _ ->
-          []
-      end
-    end)
+    |> Enum.flat_map(&open_entry/1)
     |> Enum.sort_by(& &1.id)
   end
+
+  defp open_entry(
+         {id, %{snapshot: %{visibility: :public, phase: phase, players: players}} = entry}
+       )
+       when phase in [:waiting, :countdown] and length(players) < 8 do
+    if Arena.Cluster.alive?(entry.pid),
+      do: [%{id: id, player_count: length(players), capacity: 8}],
+      else: []
+  end
+
+  defp open_entry(_), do: []
 
   defp publish(matches) do
     Phoenix.PubSub.broadcast(Arena.PubSub, @topic, {:lobby_updated, open(matches)})

@@ -23,6 +23,7 @@ defmodule ArenaWeb.MatchChannel do
           {:ok, snapshot} ->
             send(self(), :after_join)
             socket = socket |> assign(:match_id, id) |> assign(:guest, guest)
+
             {:ok,
              %{
                player: guest,
@@ -31,7 +32,8 @@ defmodule ArenaWeb.MatchChannel do
                state: GameJSON.render(snapshot.game)
              }, socket}
 
-          {:error, reason} -> {:error, %{reason: to_string(reason)}}
+          {:error, reason} ->
+            {:error, %{reason: to_string(reason)}}
         end
 
       {:error, reason} ->
@@ -63,8 +65,15 @@ defmodule ArenaWeb.MatchChannel do
   defp handle_message("resync", _payload, socket) do
     case match_call(fn -> Match.snapshot(socket.assigns.match_id) end) do
       {:ok, snapshot} ->
-        {:ok, %{state: GameJSON.render(snapshot.game), phase: snapshot.phase, countdown_ms: snapshot.countdown_ms}}
-      {:error, reason} -> {:error, %{reason: to_string(reason)}}
+        {:ok,
+         %{
+           state: GameJSON.render(snapshot.game),
+           phase: snapshot.phase,
+           countdown_ms: snapshot.countdown_ms
+         }}
+
+      {:error, reason} ->
+        {:error, %{reason: to_string(reason)}}
     end
   end
 
@@ -109,13 +118,7 @@ defmodule ArenaWeb.MatchChannel do
   end
 
   def handle_info({:match_status, id, phase, players}, %{assigns: %{match_id: id}} = socket) do
-    countdown_ms =
-      if phase == :countdown do
-        case match_call(fn -> Match.snapshot(id) end) do
-          {:ok, snapshot} -> snapshot.countdown_ms
-          _ -> nil
-        end
-      end
+    countdown_ms = countdown_remaining(phase, id)
 
     push_message(socket, "status", %{phase: phase, players: players, countdown_ms: countdown_ms})
     {:noreply, socket}
@@ -146,20 +149,29 @@ defmodule ArenaWeb.MatchChannel do
     {:noreply, socket}
   end
 
-  defp match_call(fun) do
-    try do
-      case fun.() do
-        :ok -> :ok
-        {:ok, snapshot} -> {:ok, snapshot}
-        {:error, reason} -> {:error, reason}
-        snapshot -> {:ok, snapshot}
-      end
-    catch
-      :exit, {:noproc, _} -> {:error, :not_found}
-      :exit, reason ->
-        Logger.warning("match call failed: #{inspect(reason)}")
-        {:error, :unavailable}
+  defp countdown_remaining(:countdown, id) do
+    case match_call(fn -> Match.snapshot(id) end) do
+      {:ok, snapshot} -> snapshot.countdown_ms
+      _ -> nil
     end
+  end
+
+  defp countdown_remaining(_, _), do: nil
+
+  defp match_call(fun) do
+    case fun.() do
+      :ok -> :ok
+      {:ok, snapshot} -> {:ok, snapshot}
+      {:error, reason} -> {:error, reason}
+      snapshot -> {:ok, snapshot}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :not_found}
+
+    :exit, reason ->
+      Logger.warning("match call failed: #{inspect(reason)}")
+      {:error, :unavailable}
   end
 
   defp input_reply(:ok), do: :ok

@@ -2,9 +2,10 @@ defmodule Arena.GameUpdates do
   @moduledoc "Publishes one transport update per tick using Phoenix's serializer fastlane."
 
   alias ArenaWeb.GameJSON
+  alias Phoenix.Channel.Server
 
   def snapshot(id, game) do
-    Phoenix.Channel.Server.broadcast(
+    Server.broadcast(
       Arena.PubSub,
       Arena.Match.topic(id),
       "state",
@@ -22,8 +23,12 @@ defmodule Arena.GameUpdates do
         GameJSON.delta(previous, game, events)
       end
 
-    payload = if tick_started_at_ms, do: Map.put(payload, :server_tick_at_ms, tick_started_at_ms), else: payload
-    Phoenix.Channel.Server.broadcast(Arena.PubSub, Arena.Match.topic(id), event, payload)
+    payload =
+      if tick_started_at_ms,
+        do: Map.put(payload, :server_tick_at_ms, tick_started_at_ms),
+        else: payload
+
+    Server.broadcast(Arena.PubSub, Arena.Match.topic(id), event, payload)
   end
 
   def event(tick), do: if(tick == 1 or rem(tick, 30) == 0, do: "state", else: "delta")

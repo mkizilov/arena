@@ -4,6 +4,7 @@ defmodule Arena.GameUpdatesTest do
 
   alias Arena.{Game, GameUpdates}
   alias ArenaWeb.GameJSON
+  alias Phoenix.Channel.Server
 
   defmodule CountingSerializer do
     @moduledoc false
@@ -14,17 +15,19 @@ defmodule Arena.GameUpdatesTest do
   end
 
   defp apply_delta(snapshot, delta) do
-    snakes =
-      Enum.reduce(delta.moves, snapshot.snakes, fn {id, move}, snakes ->
-        Map.update!(snakes, id, fn snake ->
-          body = [move.head | snake.body]
-          body = if move.tail_moved, do: Enum.drop(body, -1), else: body
-          %{snake | body: body, direction: move.direction}
-        end)
-      end)
+    snakes = Enum.reduce(delta.moves, snapshot.snakes, &apply_move/2)
 
-    snakes = Enum.reduce(delta.deaths, snakes, &Map.update!(&2, &1, fn snake -> %{snake | alive: false} end))
-    snakes = Enum.reduce(delta.scores, snakes, fn {id, score}, acc -> Map.update!(acc, id, &%{&1 | score: score}) end)
+    snakes =
+      Enum.reduce(
+        delta.deaths,
+        snakes,
+        &Map.update!(&2, &1, fn snake -> %{snake | alive: false} end)
+      )
+
+    snakes =
+      Enum.reduce(delta.scores, snakes, fn {id, score}, acc ->
+        Map.update!(acc, id, &%{&1 | score: score})
+      end)
 
     %{
       snapshot
@@ -36,14 +39,26 @@ defmodule Arena.GameUpdatesTest do
     }
   end
 
+  defp apply_move({id, move}, snakes), do: Map.update!(snakes, id, &move_snake(&1, move))
+
+  defp move_snake(snake, move) do
+    body = [move.head | snake.body]
+    body = if move.tail_moved, do: Enum.drop(body, -1), else: body
+    %{snake | body: body, direction: move.direction}
+  end
+
   property "applying every delta reproduces the complete published state" do
     direction = member_of([:up, :down, :left, :right])
 
-    check all seed <- tuple({integer(1..100_000), integer(1..100_000), integer(1..100_000)}),
-              inputs <- list_of(fixed_map(%{a: direction, b: direction, c: direction}), max_length: 120) do
+    check all(
+            seed <- tuple({integer(1..100_000), integer(1..100_000), integer(1..100_000)}),
+            inputs <-
+              list_of(fixed_map(%{a: direction, b: direction, c: direction}), max_length: 120)
+          ) do
       initial = Game.new([:a, :b, :c], seed)
 
-      Enum.reduce_while(inputs, {initial, GameJSON.render(initial)}, fn input, {previous, snapshot} ->
+      Enum.reduce_while(inputs, {initial, GameJSON.render(initial)}, fn input,
+                                                                        {previous, snapshot} ->
         if previous.result do
           {:halt, {previous, snapshot}}
         else
@@ -104,19 +119,41 @@ defmodule Arena.GameUpdatesTest do
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, topic)
     game = Game.new([:a, :b], {1, 2, 3})
     assert :ok = GameUpdates.publish(id, game, %{game | tick: 1}, [])
-    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "state", payload: %{state: %{tick: 1}}}
+
+    assert_receive %Phoenix.Socket.Broadcast{
+      topic: ^topic,
+      event: "state",
+      payload: %{state: %{tick: 1}}
+    }
+
     assert :ok = GameUpdates.publish(id, game, %{game | tick: 2}, [])
     assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "delta", payload: %{tick: 2}}
     assert :ok = GameUpdates.publish(id, game, %{game | tick: 30}, [])
-    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "state", payload: %{state: %{tick: 30}}}
+
+    assert_receive %Phoenix.Socket.Broadcast{
+      topic: ^topic,
+      event: "state",
+      payload: %{state: %{tick: 30}}
+    }
+
     assert :ok = GameUpdates.publish(id, game, %{game | tick: 31}, [], 1_234)
-    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "delta", payload: %{tick: 31, server_tick_at_ms: 1_234}}
+
+    assert_receive %Phoenix.Socket.Broadcast{
+      topic: ^topic,
+      event: "delta",
+      payload: %{tick: 31, server_tick_at_ms: 1_234}
+    }
   end
 
   test "fastlane encodes once for multiple subscribers using the same serializer" do
-    broadcast = %Phoenix.Socket.Broadcast{topic: "match:test", event: "delta", payload: %{tick: 2}}
+    broadcast = %Phoenix.Socket.Broadcast{
+      topic: "match:test",
+      event: "delta",
+      payload: %{tick: 2}
+    }
+
     lane = {self(), {:fastlane, self(), CountingSerializer, []}}
-    assert :ok = Phoenix.Channel.Server.dispatch([lane, lane], :none, broadcast)
+    assert :ok = Server.dispatch([lane, lane], :none, broadcast)
     assert_receive :encoded
     assert_receive {:encoded, %{tick: 2}}
     assert_receive {:encoded, %{tick: 2}}

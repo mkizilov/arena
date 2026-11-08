@@ -14,13 +14,22 @@ defmodule Arena.Match do
 
   @doc "Starts a uniquely registered match under the match supervisor."
   def start_match(id, opts \\ []) when is_binary(id) and byte_size(id) > 0 do
-    opts = Keyword.put_new_lazy(opts, :instance_id, fn -> :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false) end)
+    opts =
+      Keyword.put_new_lazy(opts, :instance_id, fn ->
+        :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+      end)
+
     Arena.Lobby.start_match(id, opts)
   end
 
   @doc false
   def child_spec({id, opts}) do
-    %{id: {__MODULE__, id}, start: {__MODULE__, :start_link, [{id, opts}]}, restart: :transient, shutdown: 15_000}
+    %{
+      id: {__MODULE__, id},
+      start: {__MODULE__, :start_link, [{id, opts}]},
+      restart: :transient,
+      shutdown: 15_000
+    }
   end
 
   @doc false
@@ -70,7 +79,8 @@ defmodule Arena.Match do
             send(self(), :announce_recovery)
             {:ok, state}
 
-          {:error, reason} -> {:stop, reason}
+          {:error, reason} ->
+            {:stop, reason}
         end
 
       :new ->
@@ -89,13 +99,15 @@ defmodule Arena.Match do
   end
 
   defp new_state(id, opts) do
-    seed = Keyword.get_lazy(opts, :seed, fn ->
-      {System.monotonic_time(), System.unique_integer([:positive]), :erlang.phash2(id)}
-    end)
+    seed =
+      Keyword.get_lazy(opts, :seed, fn ->
+        {System.monotonic_time(), System.unique_integer([:positive]), :erlang.phash2(id)}
+      end)
 
     players = Keyword.get(opts, :players, [])
 
-    if not is_list(players) or length(players) > 8 or length(Enum.uniq(players)) != length(players) do
+    if not is_list(players) or length(players) > 8 or
+         length(Enum.uniq(players)) != length(players) do
       raise ArgumentError, "initial players must be a list of at most eight unique IDs"
     end
 
@@ -200,18 +212,11 @@ defmodule Arena.Match do
         broadcast_status(state)
         {:reply, {:error, :expired}, state}
 
-      player in state.players and state.phase == :running and not state.game.snakes[player].alive ->
+      dead_player?(state, player) ->
         {:reply, {:error, :dead}, state}
 
       player in state.players ->
-        reconnecting = Map.has_key?(state.disconnects, player)
-        state = attach_session(state, player, pid)
-        state = remember_name(state, player, display_name)
-        checkpoint(state)
-        if reconnecting do
-          Phoenix.PubSub.broadcast(Arena.PubSub, topic(state.id), {:match_reconnected, state.id, player})
-        end
-        {:reply, {:ok, snapshot_state(state)}, state}
+        attach_existing(state, player, pid, display_name)
 
       state.phase not in [:waiting, :countdown] ->
         {:reply, {:error, :started}, state}
@@ -220,33 +225,27 @@ defmodule Arena.Match do
         {:reply, {:error, :full}, state}
 
       true ->
-        state = %{state | players: state.players ++ [player]}
-        state =
-          cond do
-            state.phase == :waiting and length(state.players) >= 2 ->
-              state |> set_phase(:countdown) |> arm(:countdown, state.countdown_ms)
-
-            state.phase == :waiting ->
-              arm(state, :idle, state.idle_ms)
-
-            true ->
-              state
-          end
-        state = attach_session(state, player, pid)
-        state = remember_name(state, player, display_name)
-        checkpoint(state)
-        broadcast_status(state)
-        {:reply, {:ok, snapshot_state(state)}, state}
+        attach_new(state, player, pid, display_name)
     end
   end
 
   def handle_call({:input, player, direction}, _from, state) do
     cond do
-      state.phase != :running -> {:reply, {:error, :not_running}, state}
-      player not in state.players -> {:reply, {:error, :not_joined}, state}
-      Map.has_key?(state.disconnects, player) -> {:reply, {:error, :disconnected}, state}
-      not state.game.snakes[player].alive -> {:reply, {:error, :dead}, state}
-      direction not in @directions -> {:reply, {:error, :invalid_direction}, state}
+      state.phase != :running ->
+        {:reply, {:error, :not_running}, state}
+
+      player not in state.players ->
+        {:reply, {:error, :not_joined}, state}
+
+      Map.has_key?(state.disconnects, player) ->
+        {:reply, {:error, :disconnected}, state}
+
+      not state.game.snakes[player].alive ->
+        {:reply, {:error, :dead}, state}
+
+      direction not in @directions ->
+        {:reply, {:error, :invalid_direction}, state}
+
       true ->
         state = %{state | inputs: Map.put(state.inputs, player, direction)}
         checkpoint(state)
@@ -260,6 +259,47 @@ defmodule Arena.Match do
 
   def handle_call(:tick, _from, state), do: {:reply, {:error, :not_manual_running}, state}
 
+  defp dead_player?(state, player),
+    do:
+      player in state.players and state.phase == :running and not state.game.snakes[player].alive
+
+  defp attach_existing(state, player, pid, display_name) do
+    reconnecting = Map.has_key?(state.disconnects, player)
+    state = state |> attach_session(player, pid) |> remember_name(player, display_name)
+    checkpoint(state)
+
+    if reconnecting do
+      Phoenix.PubSub.broadcast(
+        Arena.PubSub,
+        topic(state.id),
+        {:match_reconnected, state.id, player}
+      )
+    end
+
+    {:reply, {:ok, snapshot_state(state)}, state}
+  end
+
+  defp attach_new(state, player, pid, display_name) do
+    state = %{state | players: state.players ++ [player]}
+
+    state =
+      cond do
+        state.phase == :waiting and length(state.players) >= 2 ->
+          state |> set_phase(:countdown) |> arm(:countdown, state.countdown_ms)
+
+        state.phase == :waiting ->
+          arm(state, :idle, state.idle_ms)
+
+        true ->
+          state
+      end
+
+    state = state |> attach_session(player, pid) |> remember_name(player, display_name)
+    checkpoint(state)
+    broadcast_status(state)
+    {:reply, {:ok, snapshot_state(state)}, state}
+  end
+
   @impl true
   def handle_info({:timer, kind, token}, %{timer: {_ref, token}} = state) do
     state = %{state | timer: nil}
@@ -270,6 +310,7 @@ defmodule Arena.Match do
 
       :countdown ->
         game = Game.new(state.players, state.seed)
+
         state = %{
           state
           | game: game,
@@ -277,6 +318,7 @@ defmodule Arena.Match do
             epoch: System.monotonic_time(:millisecond),
             scheduled_tick: 0
         }
+
         state = set_phase(state, :running)
         state = schedule_tick(state)
         checkpoint(state)
@@ -294,18 +336,29 @@ defmodule Arena.Match do
   def handle_info({:timer, _kind, _token}, state), do: {:noreply, state}
 
   def handle_info(:announce_recovery, state) do
-    Phoenix.PubSub.broadcast(Arena.PubSub, "arena:matches", {:match_registered, state.id, self(), :recovered})
+    Phoenix.PubSub.broadcast(
+      Arena.PubSub,
+      "arena:matches",
+      {:match_registered, state.id, self(), :recovered}
+    )
+
     if state.game do
       :ok = Arena.GameUpdates.snapshot(state.id, state.game)
       Arena.Telemetry.channel(:out, "state", state.id, nil, session_count(state))
     end
+
     if state.phase == :finished, do: Arena.ResultWriter.wake()
     broadcast_status(state)
     {:noreply, state}
   end
 
   def handle_info(:announce_started, state) do
-    Phoenix.PubSub.broadcast(Arena.PubSub, "arena:matches", {:match_registered, state.id, self(), :started})
+    Phoenix.PubSub.broadcast(
+      Arena.PubSub,
+      "arena:matches",
+      {:match_registered, state.id, self(), :started}
+    )
+
     {:noreply, state}
   end
 
@@ -316,25 +369,41 @@ defmodule Arena.Match do
 
       {{player, ^pid}, monitors} ->
         sessions = Map.get(state.connections, player, MapSet.new()) |> MapSet.delete(pid)
-        connections = if MapSet.size(sessions) == 0 do
-          Map.delete(state.connections, player)
-        else
-          Map.put(state.connections, player, sessions)
-        end
+
+        connections =
+          if MapSet.size(sessions) == 0 do
+            Map.delete(state.connections, player)
+          else
+            Map.put(state.connections, player, sessions)
+          end
+
         state = %{state | monitors: monitors, connections: connections}
 
-        state = if MapSet.size(sessions) == 0 and player in state.players and state.phase != :finished do
-          deadline = System.monotonic_time(:millisecond) + state.reconnect_ms
-          state = %{state | inputs: Map.delete(state.inputs, player), disconnects: Map.put(state.disconnects, player, deadline)}
-          arm_disconnect(state, player, deadline)
-        else
-          state
-        end
+        state =
+          if MapSet.size(sessions) == 0 and player in state.players and state.phase != :finished do
+            deadline = System.monotonic_time(:millisecond) + state.reconnect_ms
+
+            state = %{
+              state
+              | inputs: Map.delete(state.inputs, player),
+                disconnects: Map.put(state.disconnects, player, deadline)
+            }
+
+            arm_disconnect(state, player, deadline)
+          else
+            state
+          end
 
         checkpoint(state)
+
         if Map.has_key?(state.disconnects, player) do
-          Phoenix.PubSub.broadcast(Arena.PubSub, topic(state.id), {:match_disconnected, state.id, player})
+          Phoenix.PubSub.broadcast(
+            Arena.PubSub,
+            topic(state.id),
+            {:match_disconnected, state.id, player}
+          )
         end
+
         {:noreply, state}
     end
   end
@@ -401,7 +470,11 @@ defmodule Arena.Match do
     previous = state.published_game
     state = %{state | game: game, published_game: game, inputs: %{}, forfeits: []}
 
-    state = if game.result, do: state |> set_phase(:finished) |> arm(:shutdown, state.grace_ms), else: state
+    state =
+      if game.result,
+        do: state |> set_phase(:finished) |> arm(:shutdown, state.grace_ms),
+        else: state
+
     if game.result do
       result = Arena.Results.build(state.id, state.result_id, game, state.names)
       :ok = Arena.MatchStore.finish(state.id, checkpoint_data(state), result)
@@ -409,10 +482,19 @@ defmodule Arena.Match do
     else
       checkpoint(state)
     end
+
     :ok = Arena.GameUpdates.publish(state.id, previous, game, events, tick_started_at_ms)
-    Arena.Telemetry.channel(:out, Arena.GameUpdates.event(game.tick), state.id, nil, session_count(state))
+
+    Arena.Telemetry.channel(
+      :out,
+      Arena.GameUpdates.event(game.tick),
+      state.id,
+      nil,
+      session_count(state)
+    )
+
     if game.result, do: broadcast_status(state)
-    if not game.result and active_players(state) != previous_count, do: observe(state)
+    if is_nil(game.result) and active_players(state) != previous_count, do: observe(state)
     elapsed = max(System.monotonic_time(:nanosecond) - started, 0)
     Arena.Telemetry.tick(state.id, game.tick, elapsed)
     state
@@ -435,8 +517,14 @@ defmodule Arena.Match do
     token = make_ref()
     ref = Process.send_after(self(), {:timer, kind, token}, delay)
     deadline = System.monotonic_time(:millisecond) + delay
-    %{state | timer: {ref, token}, timer_kind: kind, timer_deadline: deadline,
-      countdown_ends_at: if(kind == :countdown, do: deadline, else: nil)}
+
+    %{
+      state
+      | timer: {ref, token},
+        timer_kind: kind,
+        timer_deadline: deadline,
+        countdown_ends_at: if(kind == :countdown, do: deadline, else: nil)
+    }
   end
 
   defp countdown_remaining(%{phase: :countdown, countdown_ends_at: deadline})
@@ -463,7 +551,10 @@ defmodule Arena.Match do
     state
     |> Map.merge(%{timer: nil, monitors: %{}, disconnect_timers: %{}})
     |> Map.put(:checkpoint_node, node())
-    |> Map.put(:checkpoint_offset_ms, System.system_time(:millisecond) - System.monotonic_time(:millisecond))
+    |> Map.put(
+      :checkpoint_offset_ms,
+      System.system_time(:millisecond) - System.monotonic_time(:millisecond)
+    )
   end
 
   defp remember_name(state, player, display_name) when is_binary(display_name),
@@ -483,9 +574,10 @@ defmodule Arena.Match do
         end)
       end)
 
-    state = Enum.reduce(state.disconnects, state, fn {player, deadline}, acc ->
-      arm_disconnect(acc, player, deadline)
-    end)
+    state =
+      Enum.reduce(state.disconnects, state, fn {player, deadline}, acc ->
+        arm_disconnect(acc, player, deadline)
+      end)
 
     cond do
       state.phase == :running ->
@@ -501,20 +593,27 @@ defmodule Arena.Match do
     end
   end
 
-  defp translate_deadlines(%{checkpoint_node: source, checkpoint_offset_ms: offset} = saved) when source != node() do
+  defp translate_deadlines(%{checkpoint_node: source, checkpoint_offset_ms: offset} = saved)
+       when source != node() do
     shift = offset - (System.system_time(:millisecond) - System.monotonic_time(:millisecond))
-    remotes = Map.new(saved.connections, fn {player, pids} ->
-      {player, MapSet.filter(pids, &(node(&1) != source))}
-    end)
+
+    remotes =
+      Map.new(saved.connections, fn {player, pids} ->
+        {player, MapSet.filter(pids, &(node(&1) != source))}
+      end)
+
     disconnects = Map.new(saved.disconnects, fn {id, deadline} -> {id, deadline + shift} end)
     now = System.monotonic_time(:millisecond)
-    disconnects = Enum.reduce(remotes, disconnects, fn {player, pids}, acc ->
-      if MapSet.size(pids) == 0 and player in saved.players and saved.phase != :finished do
-        Map.put_new(acc, player, now + saved.reconnect_ms)
-      else
-        acc
-      end
-    end)
+
+    disconnects =
+      Enum.reduce(remotes, disconnects, fn {player, pids}, acc ->
+        if MapSet.size(pids) == 0 and player in saved.players and saved.phase != :finished do
+          Map.put_new(acc, player, now + saved.reconnect_ms)
+        else
+          acc
+        end
+      end)
+
     inputs = Enum.reduce(Map.keys(disconnects), saved.inputs, &Map.delete(&2, &1))
 
     saved
@@ -537,6 +636,7 @@ defmodule Arena.Match do
       state
     else
       ref = Process.monitor(pid)
+
       %{
         state
         | connections: Map.put(state.connections, player, MapSet.put(sessions, pid)),
@@ -568,14 +668,15 @@ defmodule Arena.Match do
   defp remove_player(state, player) do
     state = cancel_disconnect(state, player)
 
-    monitors = Enum.reduce(state.monitors, %{}, fn {ref, {owner, pid}}, acc ->
-      if owner == player do
-        Process.demonitor(ref, [:flush])
-        acc
-      else
-        Map.put(acc, ref, {owner, pid})
-      end
-    end)
+    monitors =
+      Enum.reduce(state.monitors, %{}, fn {ref, {owner, pid}}, acc ->
+        if owner == player do
+          Process.demonitor(ref, [:flush])
+          acc
+        else
+          Map.put(acc, ref, {owner, pid})
+        end
+      end)
 
     state = %{
       state
@@ -590,6 +691,7 @@ defmodule Arena.Match do
 
   defp broadcast_status(state) do
     observe(state)
+
     Phoenix.PubSub.broadcast(
       Arena.PubSub,
       topic(state.id),
@@ -597,7 +699,8 @@ defmodule Arena.Match do
     )
   end
 
-  defp observe(state), do: Arena.Observability.update(state.id, state.phase, active_players(state))
+  defp observe(state),
+    do: Arena.Observability.update(state.id, state.phase, active_players(state))
 
   defp active_players(%{phase: :running, game: game}) when not is_nil(game),
     do: Enum.count(game.snakes, fn {_id, snake} -> snake.alive end)
@@ -605,5 +708,8 @@ defmodule Arena.Match do
   defp active_players(_state), do: 0
 
   defp session_count(state),
-    do: Enum.reduce(state.connections, 0, fn {_id, sessions}, total -> total + MapSet.size(sessions) end)
+    do:
+      Enum.reduce(state.connections, 0, fn {_id, sessions}, total ->
+        total + MapSet.size(sessions)
+      end)
 end

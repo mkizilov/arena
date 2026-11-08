@@ -9,10 +9,16 @@ defmodule Arena.MatchStore do
   def get(id), do: GenServer.call(__MODULE__, {:get, id})
   def get(id, instance), do: GenServer.call(__MODULE__, {:get, id, instance}, 10_000)
   def prepare(id, instance), do: GenServer.call(__MODULE__, {:prepare, id, instance}, 10_000)
-  def abort_prepare(id, instance), do: GenServer.call(__MODULE__, {:abort_prepare, id, instance}, 10_000)
+
+  def abort_prepare(id, instance),
+    do: GenServer.call(__MODULE__, {:abort_prepare, id, instance}, 10_000)
+
   def put(id, state), do: GenServer.call(__MODULE__, {:put, id, state}, 10_000)
   def delete(id), do: GenServer.call(__MODULE__, {:delete, id}, 10_000)
-  def finish(id, state, result), do: GenServer.call(__MODULE__, {:finish, id, state, result}, 10_000)
+
+  def finish(id, state, result),
+    do: GenServer.call(__MODULE__, {:finish, id, state, result}, 10_000)
+
   def pending_results, do: GenServer.call(__MODULE__, :pending_results)
   def complete_result(id), do: GenServer.call(__MODULE__, {:complete_result, id})
   def states, do: GenServer.call(__MODULE__, :states)
@@ -26,20 +32,25 @@ defmodule Arena.MatchStore do
 
   @impl true
   def handle_call({:get, id}, _from, table) do
-    result = case :ets.lookup(table, id) do
-      [{^id, state}] -> {:ok, state}
-      [] -> :error
-    end
+    result =
+      case :ets.lookup(table, id) do
+        [{^id, state}] -> {:ok, state}
+        [] -> :error
+      end
+
     {:reply, result, table}
   end
 
   def handle_call({:prepare, id, instance}, _from, table) do
     envelope = %{seq: 0, state: nil, result: nil}
+
     case replicate(id, instance, envelope) do
       :ok ->
         :ets.insert(table, {{:prepared, id, instance}, envelope})
         {:reply, :ok, table}
-      error -> {:reply, error, table}
+
+      error ->
+        {:reply, error, table}
     end
   end
 
@@ -52,20 +63,31 @@ defmodule Arena.MatchStore do
   def handle_call({:get, id, instance}, _from, table) do
     replicas = replica_candidates(id, instance)
     candidates = local_candidates(table, id, instance) ++ Enum.filter(replicas, &is_map/1)
-    result = if :deleted in replicas, do: :deleted, else: Enum.max_by(candidates, & &1.seq, fn -> nil end)
+
+    result =
+      if :deleted in replicas,
+        do: :deleted,
+        else: Enum.max_by(candidates, & &1.seq, fn -> nil end)
 
     case result do
-      nil -> {:reply, :error, table}
-      :deleted -> {:reply, :deleted, table}
+      nil ->
+        {:reply, :error, table}
+
+      :deleted ->
+        {:reply, :deleted, table}
+
       %{state: nil} ->
         :ets.insert(table, {{:version, id, instance}, 0})
         {:reply, :new, table}
+
       envelope ->
         :ets.insert(table, [{id, envelope.state}, {{:version, id, instance}, envelope.seq}])
+
         if envelope.result do
           :ets.insert_new(table, {{:result, envelope.result.result_id}, envelope.result})
           Arena.ResultWriter.wake()
         end
+
         {:reply, {:ok, envelope.state}, table}
     end
   end
@@ -84,15 +106,24 @@ defmodule Arena.MatchStore do
         :ets.delete(table, {:version, id, state.result_id})
         :ets.delete(table, {:prepared, id, state.result_id})
         delete_replicas(id, state.result_id)
-        Enum.each(Node.list(), fn target -> GenServer.cast({__MODULE__, target}, {:forget, id, state.result_id}) end)
-      [] -> :ok
+
+        Enum.each(Node.list(), fn target ->
+          GenServer.cast({__MODULE__, target}, {:forget, id, state.result_id})
+        end)
+
+      [] ->
+        :ok
     end
+
     :ets.delete(table, id)
     {:reply, :ok, table}
   end
 
   def handle_call(:pending_results, _from, table) do
-    results = for {{:result, id}, result} <- :ets.match_object(table, {{:result, :_}, :_}), do: {id, result}
+    results =
+      for {{:result, id}, result} <- :ets.match_object(table, {{:result, :_}, :_}),
+          do: {id, result}
+
     {:reply, results, table}
   end
 
@@ -112,6 +143,7 @@ defmodule Arena.MatchStore do
       [{^id, %{result_id: ^instance}}] -> :ets.delete(table, id)
       _ -> :ok
     end
+
     :ets.delete(table, {:version, id, instance})
     :ets.delete(table, {:prepared, id, instance})
     {:noreply, table}
@@ -138,47 +170,67 @@ defmodule Arena.MatchStore do
 
   def handle_info({:sync_failed, id, instance, reason}, table) do
     case :ets.lookup(table, id) do
-      [{^id, %{result_id: ^instance}}] -> Logger.warning("replica synchronization failed: #{inspect(reason)}", match_id: id)
-      _ -> :ok
+      [{^id, %{result_id: ^instance}}] ->
+        Logger.warning("replica synchronization failed: #{inspect(reason)}", match_id: id)
+
+      _ ->
+        :ok
     end
+
     {:noreply, table}
   end
 
   defp start_sync(table) do
-    running = case :ets.lookup(table, :sync_task) do
-      [{:sync_task, pid}] -> Process.alive?(pid)
-      [] -> false
+    if sync_needed?(table), do: start_sync_task(table)
+    :ok
+  end
+
+  defp sync_needed?(table) do
+    running =
+      case :ets.lookup(table, :sync_task) do
+        [{:sync_task, pid}] -> Process.alive?(pid)
+        [] -> false
+      end
+
+    not running and Node.list() != [] and not is_nil(Process.whereis(Arena.TaskSupervisor))
+  end
+
+  defp start_sync_task(table) do
+    snapshots =
+      for {id, state} <- :ets.tab2list(table),
+          is_binary(id),
+          do: {id, state.result_id, envelope(table, id, state)}
+
+    owner = self()
+
+    case Task.Supervisor.start_child(Arena.TaskSupervisor, fn ->
+           Enum.each(snapshots, &sync_snapshot(&1, owner))
+         end) do
+      {:ok, pid} -> :ets.insert(table, {:sync_task, pid})
+      {:error, reason} -> Logger.warning("replica resync could not start: #{inspect(reason)}")
     end
+  end
 
-    if not running and Node.list() != [] and Process.whereis(Arena.TaskSupervisor) do
-      snapshots = for {id, state} <- :ets.tab2list(table), is_binary(id),
-        do: {id, state.result_id, envelope(table, id, state)}
-
-      owner = self()
-      case Task.Supervisor.start_child(Arena.TaskSupervisor, fn ->
-        Enum.each(snapshots, fn {id, instance, value} ->
-          if locally_owned?(id) do
-            case replicate(id, instance, value) do
-              :ok -> :ok
-              error -> send(owner, {:sync_failed, id, instance, error})
-            end
-          end
-        end)
-      end) do
-        {:ok, pid} -> :ets.insert(table, {:sync_task, pid})
-        {:error, reason} -> Logger.warning("replica resync could not start: #{inspect(reason)}")
+  defp sync_snapshot({id, instance, value}, owner) do
+    if locally_owned?(id) do
+      case replicate(id, instance, value) do
+        :ok -> :ok
+        error -> send(owner, {:sync_failed, id, instance, error})
       end
     end
-    :ok
   end
 
   defp persist(table, id, state, result) do
     instance = state.result_id
     seq = version(table, id, instance) + 1
-    pending = result || case :ets.lookup(table, {:result, instance}) do
-      [{_, existing}] -> existing
-      [] -> nil
-    end
+
+    pending =
+      result ||
+        case :ets.lookup(table, {:result, instance}) do
+          [{_, existing}] -> existing
+          [] -> nil
+        end
+
     value = %{seq: seq, state: state, result: pending}
 
     case replicate(id, instance, value) do
@@ -188,38 +240,47 @@ defmodule Arena.MatchStore do
         true = :ets.insert(table, objects)
         {:reply, :ok, table}
 
-      error -> {:reply, error, table}
+      error ->
+        {:reply, error, table}
     end
   end
 
   defp local_candidates(table, id, instance) do
-    state = case :ets.lookup(table, id) do
-      [{^id, %{result_id: ^instance} = saved}] -> [envelope(table, id, saved)]
-      _ -> []
-    end
-    prepared = case :ets.lookup(table, {:prepared, id, instance}) do
-      [{_, value}] -> [value]
-      [] -> []
-    end
+    state =
+      case :ets.lookup(table, id) do
+        [{^id, %{result_id: ^instance} = saved}] -> [envelope(table, id, saved)]
+        _ -> []
+      end
+
+    prepared =
+      case :ets.lookup(table, {:prepared, id, instance}) do
+        [{_, value}] -> [value]
+        [] -> []
+      end
+
     state ++ prepared
   end
 
   defp replica_candidates(id, instance) do
     [node() | Node.list()]
-    |> Enum.flat_map(fn target ->
-      case replica_call(fn -> MatchReplica.get(target, id, instance) end) do
-        {:ok, value} -> [value]
-        :deleted -> [:deleted]
-        _ -> []
-      end
-    end)
+    |> Enum.flat_map(&replica_candidate(&1, id, instance))
+  end
+
+  defp replica_candidate(target, id, instance) do
+    case replica_call(fn -> MatchReplica.get(target, id, instance) end) do
+      {:ok, value} -> [value]
+      :deleted -> [:deleted]
+      _ -> []
+    end
   end
 
   defp envelope(table, id, state) do
-    result = case :ets.lookup(table, {:result, state.result_id}) do
-      [{_, value}] -> value
-      [] -> nil
-    end
+    result =
+      case :ets.lookup(table, {:result, state.result_id}) do
+        [{_, value}] -> value
+        [] -> nil
+      end
+
     %{seq: version(table, id, state.result_id), state: state, result: result}
   end
 
@@ -232,28 +293,34 @@ defmodule Arena.MatchStore do
 
   defp replicate(id, instance, value) do
     case Node.list() |> Enum.sort() do
-      [] -> :ok
+      [] ->
+        :ok
+
       peers ->
-        if Enum.any?(peers, fn target -> replica_call(fn -> MatchReplica.put(target, id, instance, value) end) == :ok end),
-          do: :ok, else: {:error, :replica_unavailable}
+        if Enum.any?(peers, &replica_put?(&1, id, instance, value)),
+          do: :ok,
+          else: {:error, :replica_unavailable}
     end
   end
 
+  defp replica_put?(target, id, instance, value),
+    do: replica_call(fn -> MatchReplica.put(target, id, instance, value) end) == :ok
+
   defp delete_replicas(id, instance) do
-    Enum.each([node() | Node.list()], fn target ->
-      case replica_call(fn -> MatchReplica.delete(target, id, instance) end) do
-        :ok -> :ok
-        _ -> Logger.warning("unable to delete replica", match_id: id)
-      end
-    end)
+    Enum.each([node() | Node.list()], &delete_replica(&1, id, instance))
+  end
+
+  defp delete_replica(target, id, instance) do
+    case replica_call(fn -> MatchReplica.delete(target, id, instance) end) do
+      :ok -> :ok
+      _ -> Logger.warning("unable to delete replica", match_id: id)
+    end
   end
 
   defp replica_call(fun) do
-    try do
-      fun.()
-    catch
-      :exit, _ -> :error
-    end
+    fun.()
+  catch
+    :exit, _ -> :error
   end
 
   defp locally_owned?(id) do

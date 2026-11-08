@@ -3,23 +3,25 @@ defmodule ArenaLoad.PrometheusTest do
   alias ArenaLoad.Prometheus
 
   test "uses histogram and counter differences rather than lifetime totals" do
-    before = Prometheus.parse("""
-    arena_match_tick_duration_us_bucket{le="1000"} 10
-    arena_match_tick_duration_us_bucket{le="5000"} 20
-    arena_match_tick_duration_us_bucket{le="+Inf"} 20
-    arena_match_overrun_count_total 3
-    arena_channel_in_messages_total 100
-    arena_channel_out_messages_total 200
-    """)
+    before =
+      Prometheus.parse("""
+      arena_match_tick_duration_us_bucket{le="1000"} 10
+      arena_match_tick_duration_us_bucket{le="5000"} 20
+      arena_match_tick_duration_us_bucket{le="+Inf"} 20
+      arena_match_overrun_count_total 3
+      arena_channel_in_messages_total 100
+      arena_channel_out_messages_total 200
+      """)
 
-    after_sample = Prometheus.parse("""
-    arena_match_tick_duration_us_bucket{le="1000"} 12
-    arena_match_tick_duration_us_bucket{le="5000"} 25
-    arena_match_tick_duration_us_bucket{le="+Inf"} 25
-    arena_match_overrun_count_total 4
-    arena_channel_in_messages_total 120
-    arena_channel_out_messages_total 260
-    """)
+    after_sample =
+      Prometheus.parse("""
+      arena_match_tick_duration_us_bucket{le="1000"} 12
+      arena_match_tick_duration_us_bucket{le="5000"} 25
+      arena_match_tick_duration_us_bucket{le="+Inf"} 25
+      arena_match_overrun_count_total 4
+      arena_channel_in_messages_total 120
+      arena_channel_out_messages_total 260
+      """)
 
     result = Prometheus.difference(before, after_sample, 10)
     assert result.tick_samples == 5

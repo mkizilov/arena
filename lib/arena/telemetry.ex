@@ -7,8 +7,13 @@ defmodule Arena.Telemetry do
     :telemetry.execute([:arena, :match, :tick], measurements, %{match_id: match_id})
 
     if duration_ns * 15 > 1_000_000_000 do
-      :telemetry.execute([:arena, :match, :overrun], %{count: 1, duration_ns: duration_ns}, %{match_id: match_id})
-      Logger.warning("match #{inspect(match_id)} tick overrun: #{measurements.duration_us}µs", match_id: match_id)
+      :telemetry.execute([:arena, :match, :overrun], %{count: 1, duration_ns: duration_ns}, %{
+        match_id: match_id
+      })
+
+      Logger.warning("match #{inspect(match_id)} tick overrun: #{measurements.duration_us}µs",
+        match_id: match_id
+      )
     end
   end
 
@@ -21,6 +26,9 @@ defmodule Arena.Telemetry do
   end
 
   def matchmaking(match_id, player_id, wait_ms) do
-    :telemetry.execute([:arena, :matchmaking, :wait], %{wait_ms: wait_ms}, %{match_id: match_id, player_id: player_id})
+    :telemetry.execute([:arena, :matchmaking, :wait], %{wait_ms: wait_ms}, %{
+      match_id: match_id,
+      player_id: player_id
+    })
   end
 end

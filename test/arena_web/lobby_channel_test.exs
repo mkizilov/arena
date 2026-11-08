@@ -16,18 +16,22 @@ defmodule ArenaWeb.LobbyChannelTest do
     end)
 
     assert_push "match_found", %{match_id: id}, 2_000
+
     on_exit(fn ->
       case Horde.Registry.lookup(Arena.MatchRegistry, id) do
         [{_, _}] -> Arena.Match.stop(id)
         [] -> :ok
       end
     end)
+
     for _ <- 1..7, do: assert_push("match_found", %{match_id: ^id}, 2_000)
   end
 
   test "lobby channel validates the signed identity" do
     socket = socket(UserSocket, "guest", %{guest_token: "invalid"})
-    assert {:error, %{reason: "invalid_token"}} = subscribe_and_join(socket, LobbyChannel, "lobby:queue")
+
+    assert {:error, %{reason: "invalid_token"}} =
+             subscribe_and_join(socket, LobbyChannel, "lobby:queue")
   end
 
   test "a channel can cancel its own quick-play entry" do

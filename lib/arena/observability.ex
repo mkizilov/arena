@@ -27,15 +27,25 @@ defmodule Arena.Observability do
     matches =
       Arena.MatchStore.states()
       |> Enum.reduce(%{}, fn {id, state}, acc ->
-        if Enum.any?(Horde.Registry.lookup(Arena.MatchRegistry, id), fn {pid, _} -> node(pid) == node() end) do
+        if locally_owned?(id) do
           Map.put(acc, id, population(state.phase, state.game))
         else
           acc
         end
       end)
 
-    state = %{generation: System.unique_integer([:positive, :monotonic]), matches: matches, ticks: 0, overruns: 0, last_tick_us: 0,
-      messages_in: 0, messages_out: 0, waits: 0, wait_total_ms: 0}
+    state = %{
+      generation: System.unique_integer([:positive, :monotonic]),
+      matches: matches,
+      ticks: 0,
+      overruns: 0,
+      last_tick_us: 0,
+      messages_in: 0,
+      messages_out: 0,
+      waits: 0,
+      wait_total_ms: 0
+    }
+
     emit_population(state, nil)
     {:ok, state}
   end
@@ -47,7 +57,9 @@ defmodule Arena.Observability do
 
   @impl true
   def handle_cast({:update, id, phase, players}, state) do
-    value = if phase == :running, do: %{active: 1, players: players}, else: %{active: 0, players: 0}
+    value =
+      if phase == :running, do: %{active: 1, players: players}, else: %{active: 0, players: 0}
+
     if Map.get(state.matches, id) == value do
       {:noreply, state}
     else
@@ -76,7 +88,9 @@ defmodule Arena.Observability do
     do: {:noreply, %{state | messages_out: state.messages_out + m.count}}
 
   def handle_cast({:event, [:arena, :matchmaking, :wait], m, _}, state),
-    do: {:noreply, %{state | waits: state.waits + 1, wait_total_ms: state.wait_total_ms + m.wait_ms}}
+    do:
+      {:noreply,
+       %{state | waits: state.waits + 1, wait_total_ms: state.wait_total_ms + m.wait_ms}}
 
   @impl true
   def terminate(_reason, _state), do: :telemetry.detach(__MODULE__)
@@ -87,14 +101,28 @@ defmodule Arena.Observability do
 
   defp population(_, _), do: %{active: 0, players: 0}
 
+  defp locally_owned?(id) do
+    Enum.any?(Horde.Registry.lookup(Arena.MatchRegistry, id), fn {pid, _} ->
+      node(pid) == node()
+    end)
+  end
+
   defp totals(state) do
     Enum.reduce(state.matches, %{active_matches: 0, active_players: 0}, fn {_id, entry}, acc ->
-      %{active_matches: acc.active_matches + entry.active, active_players: acc.active_players + entry.players}
+      %{
+        active_matches: acc.active_matches + entry.active,
+        active_players: acc.active_players + entry.players
+      }
     end)
   end
 
   defp emit_population(state, match_id) do
     counts = totals(state)
-    :telemetry.execute([:arena, :population], %{matches: counts.active_matches, players: counts.active_players}, %{match_id: match_id})
+
+    :telemetry.execute(
+      [:arena, :population],
+      %{matches: counts.active_matches, players: counts.active_players},
+      %{match_id: match_id}
+    )
   end
 end

@@ -28,16 +28,18 @@ defmodule ArenaWeb.LobbyChannel do
     name = if event in ["quick_play", "cancel"], do: event, else: "other"
     Arena.Telemetry.channel(:in, name, nil, guest.id)
 
-    result = case event do
-      "quick_play" -> Matchmaker.quick_play(guest.id)
-      "cancel" -> Matchmaker.cancel(guest.id)
-      _ -> {:error, :unsupported_event}
-    end
+    result =
+      case event do
+        "quick_play" -> Matchmaker.quick_play(guest.id)
+        "cancel" -> Matchmaker.cancel(guest.id)
+        _ -> {:error, :unsupported_event}
+      end
 
-    reply = case result do
-      :ok -> :ok
-      {:error, reason} -> {:error, %{reason: to_string(reason)}}
-    end
+    reply =
+      case result do
+        :ok -> :ok
+        {:error, reason} -> {:error, %{reason: to_string(reason)}}
+      end
 
     Arena.Telemetry.channel(:out, "lobby_reply", nil, guest.id)
     {:reply, reply, socket}
@@ -50,7 +52,10 @@ defmodule ArenaWeb.LobbyChannel do
     {:noreply, socket}
   end
 
-  def handle_info({:matchmaking_error, player, _reason}, %{assigns: %{guest: %{id: player}}} = socket) do
+  def handle_info(
+        {:matchmaking_error, player, _reason},
+        %{assigns: %{guest: %{id: player}}} = socket
+      ) do
     push(socket, "queue_error", %{reason: "match_unavailable"})
     Arena.Telemetry.channel(:out, "queue_error", nil, player)
     {:noreply, socket}

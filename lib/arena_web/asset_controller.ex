@@ -17,7 +17,10 @@ defmodule ArenaWeb.AssetController do
   end
 
   def vendor(conn, %{"file" => "phoenix_live_view.esm.js"}) do
-    respond(conn, File.read!(Application.app_dir(:phoenix_live_view, "priv/static/phoenix_live_view.esm.js")))
+    respond(
+      conn,
+      File.read!(Application.app_dir(:phoenix_live_view, "priv/static/phoenix_live_view.esm.js"))
+    )
   end
 
   def vendor(conn, _params), do: respond(conn, nil)

@@ -3,7 +3,7 @@ defmodule Arena.MatchTest do
 
   alias Arena.Match
 
-  defp start_match(opts \\ []) do
+  defp start_match(opts) do
     id = "test-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
     {:ok, pid} = Match.start_match(id, Keyword.merge([seed: {1, 2, 3}, manual: true], opts))
@@ -60,12 +60,24 @@ defmodule Arena.MatchTest do
     assert :ok = Match.input(id, :a, :down)
     assert :ok = Match.input(id, :a, :up)
     assert :ok = Match.tick(id)
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "state", payload: %{state: %{tick: 1}}}
+
+    assert_receive %Phoenix.Socket.Broadcast{
+      topic: "match:" <> ^id,
+      event: "state",
+      payload: %{state: %{tick: 1}}
+    }
+
     game = Match.snapshot(id).game
     assert game.tick == 1
     assert {:value, {5, 3}} = :queue.peek(game.snakes.a.body)
     assert :ok = Match.tick(id)
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "delta", payload: %{tick: 2}}
+
+    assert_receive %Phoenix.Socket.Broadcast{
+      topic: "match:" <> ^id,
+      event: "delta",
+      payload: %{tick: 2}
+    }
+
     game = Match.snapshot(id).game
     assert game.tick == 2
     assert {:value, {5, 2}} = :queue.peek(game.snakes.a.body)
@@ -110,7 +122,19 @@ defmodule Arena.MatchTest do
   test "automatic mode schedules and broadcasts ticks without manual intervention" do
     {id, _pid} = start_running(manual: false)
     assert {:error, :not_manual_running} = Match.tick(id)
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "state", payload: %{state: %{tick: 1}}}, 1_000
-    assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^id, event: "delta", payload: %{tick: 2}}, 1_000
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     topic: "match:" <> ^id,
+                     event: "state",
+                     payload: %{state: %{tick: 1}}
+                   },
+                   1_000
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     topic: "match:" <> ^id,
+                     event: "delta",
+                     payload: %{tick: 2}
+                   },
+                   1_000
   end
 end

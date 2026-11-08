@@ -31,6 +31,7 @@ defmodule ArenaWeb.MatchChannelTest do
   test "a signed guest joins and is added to the match" do
     id = start_match(countdown_ms: 60_000)
     {guest, socket} = guest_socket()
+
     assert {:ok, %{player: ^guest, phase: :waiting}, _socket} =
              subscribe_and_join(socket, MatchChannel, "match:" <> id)
 
@@ -43,27 +44,35 @@ defmodule ArenaWeb.MatchChannelTest do
     id = start_match()
     {_guest, socket} = guest_socket()
     socket = %{socket | assigns: Map.put(socket.assigns, :guest_token, "invalid")}
-    assert {:error, %{reason: "invalid_token"}} = subscribe_and_join(socket, MatchChannel, "match:" <> id)
+
+    assert {:error, %{reason: "invalid_token"}} =
+             subscribe_and_join(socket, MatchChannel, "match:" <> id)
   end
 
   test "a new guest cannot join a full or finished match" do
     full = start_match(players: Enum.map(1..8, &"player-#{&1}"), countdown_ms: 60_000)
     {_guest, socket} = guest_socket()
-    assert {:error, %{reason: "full"}} = subscribe_and_join(socket, MatchChannel, "match:" <> full)
+
+    assert {:error, %{reason: "full"}} =
+             subscribe_and_join(socket, MatchChannel, "match:" <> full)
 
     {guest, socket} = guest_socket()
     finished = start_match(players: [guest.id, "other"], countdown_ms: 0, manual: true)
     assert_receive {:match_status, ^finished, :running, _}
     assert :ok = Match.leave(finished, "other")
     assert :ok = Match.tick(finished)
-    assert {:error, %{reason: "finished"}} = subscribe_and_join(socket, MatchChannel, "match:" <> finished)
+
+    assert {:error, %{reason: "finished"}} =
+             subscribe_and_join(socket, MatchChannel, "match:" <> finished)
   end
 
   test "input is forwarded and each tick is pushed as a JSON-safe state" do
     {guest, socket} = guest_socket()
     id = start_match(players: [guest.id, "other"], countdown_ms: 0, manual: true)
     assert_receive {:match_status, ^id, :running, _}
-    assert {:ok, %{player: ^guest}, channel} = subscribe_and_join(socket, MatchChannel, "match:" <> id)
+
+    assert {:ok, %{player: ^guest}, channel} =
+             subscribe_and_join(socket, MatchChannel, "match:" <> id)
 
     ref = push(channel, "input", %{"direction" => "up"})
     assert_reply ref, :ok

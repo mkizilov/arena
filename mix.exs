@@ -19,6 +19,8 @@ defmodule Arena.MixProject do
     [mod: {Arena.Application, []}, extra_applications: [:crypto, :logger, :runtime_tools]]
   end
 
+  def cli, do: [preferred_envs: [check: :test]]
+
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -37,9 +39,10 @@ defmodule Arena.MixProject do
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.1", only: :test},
       {:floki, ">= 0.36.0", only: :test},
+      {:lazy_html, "~> 0.1.14", only: :test},
       {:local_cluster, "~> 2.1.0", only: :test},
       {:excoveralls, "~> 0.18", only: :test}
     ]
