@@ -125,7 +125,7 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   assert.equal(scores.rows[0].textContent, "a: 2");
   handlers.state({ state: { tick: 1, snakes: {}, result: null } });
   assert.equal(scores.rows[0].textContent, "a: 2");
-  handlers.delta({ tick: 2, moves: { a: { head: [2, 1], tail_moved: true, direction: "right" } }, deaths: [], scores: {}, events: [] });
+  handlers.delta({ tick: 2, moves: { a: { head: [2, 1], tail_moved: true, direction: "right" } }, deaths: [], scores: {}, events: [], server_tick_at_ms: 1234 });
   assert.equal(hook.current.tick, 2);
   assert.equal(hook.previous.tick, 1);
   handlers.delta({ tick: 4, moves: {}, deaths: [], scores: {}, events: [] });

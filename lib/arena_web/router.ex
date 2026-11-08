@@ -29,6 +29,7 @@ defmodule ArenaWeb.Router do
     get "/play", GuestController, :play
     get "/assets/game/:file", AssetController, :game
     get "/assets/vendor/:file", AssetController, :vendor
+    get "/loadtest/measurements", LoadtestController, :measurements
   end
 
   scope "/", ArenaWeb do

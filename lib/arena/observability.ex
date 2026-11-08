@@ -34,7 +34,7 @@ defmodule Arena.Observability do
         end
       end)
 
-    state = %{matches: matches, ticks: 0, overruns: 0, last_tick_us: 0,
+    state = %{generation: System.unique_integer([:positive, :monotonic]), matches: matches, ticks: 0, overruns: 0, last_tick_us: 0,
       messages_in: 0, messages_out: 0, waits: 0, wait_total_ms: 0}
     emit_population(state, nil)
     {:ok, state}

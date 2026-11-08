@@ -97,6 +97,8 @@ defmodule Arena.GameUpdatesTest do
     assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "delta", payload: %{tick: 2}}
     assert :ok = GameUpdates.publish(id, game, %{game | tick: 30}, [])
     assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "state", payload: %{state: %{tick: 30}}}
+    assert :ok = GameUpdates.publish(id, game, %{game | tick: 31}, [], 1_234)
+    assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "delta", payload: %{tick: 31, server_tick_at_ms: 1_234}}
   end
 
   test "fastlane encodes once for multiple subscribers using the same serializer" do

@@ -10,3 +10,6 @@ _opam/
 /.data/
 /priv/plts/*.plt*
 /cover/
+/loadtest/_build/
+/loadtest/deps/
+/loadtest/.elixir_ls/

@@ -4,6 +4,7 @@ defmodule ArenaWeb.UserSocket do
   require Logger
 
   channel "match:*", ArenaWeb.MatchChannel
+  channel "lobby:queue", ArenaWeb.LobbyChannel
 
   @impl true
   def connect(%{"token" => token}, socket, _connect_info) do

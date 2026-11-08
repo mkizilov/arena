@@ -12,7 +12,7 @@ defmodule Arena.GameUpdates do
     )
   end
 
-  def publish(id, previous, game, events) do
+  def publish(id, previous, game, events, tick_started_at_ms \\ nil) do
     event = event(game.tick)
 
     payload =
@@ -22,6 +22,7 @@ defmodule Arena.GameUpdates do
         GameJSON.delta(previous, game, events)
       end
 
+    payload = if tick_started_at_ms, do: Map.put(payload, :server_tick_at_ms, tick_started_at_ms), else: payload
     Phoenix.Channel.Server.broadcast(Arena.PubSub, Arena.Match.topic(id), event, payload)
   end
 

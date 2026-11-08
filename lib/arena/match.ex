@@ -358,6 +358,7 @@ defmodule Arena.Match do
 
   defp advance(state) do
     started = System.monotonic_time(:nanosecond)
+    tick_started_at_ms = System.system_time(:millisecond)
     previous_count = active_players(state)
     {game, events} = Game.tick(state.game, state.inputs)
     events = state.forfeits ++ events
@@ -372,7 +373,7 @@ defmodule Arena.Match do
     else
       checkpoint(state)
     end
-    :ok = Arena.GameUpdates.publish(state.id, previous, game, events)
+    :ok = Arena.GameUpdates.publish(state.id, previous, game, events, tick_started_at_ms)
     Arena.Telemetry.channel(:out, Arena.GameUpdates.event(game.tick), state.id, nil, session_count(state))
     if game.result, do: broadcast_status(state)
     if not game.result and active_players(state) != previous_count, do: observe(state)

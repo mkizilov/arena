@@ -5,7 +5,7 @@ defmodule ArenaWeb.LocalObservability do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    protected = conn.request_path == "/metrics" or conn.request_path == "/dashboard" or
+    protected = conn.request_path == "/metrics" or conn.request_path == "/loadtest/measurements" or conn.request_path == "/dashboard" or
       String.starts_with?(conn.request_path, "/dashboard/")
 
     if protected and not loopback?(conn.remote_ip) do

@@ -44,6 +44,8 @@ For deterministic tests, start a separate matchmaker with `name: nil, clock: :ma
 
 `create_private(player)` creates a room with its creator already joined and returns an eight-character random hexadecimal code. `join_private(code, player)` accepts the code case-insensitively and uses the normal match capacity and countdown rules. Codes are short invitations, **not authentication**; a future transport must authenticate and authorize players and rate-limit code guesses. Private rooms are omitted from public lobby snapshots. `Arena.Lobby.open_matches/0` returns public waiting/countdown matches with vacancies as `%{id: id, player_count: count, capacity: 8}`; on creation, membership/phase changes and termination the lobby broadcasts `{:lobby_updated, rooms}` on `Arena.Lobby.topic()` (`"lobby"`). Subscribers should fetch an initial snapshot separately; updates are in-memory and eventually consistent with match processes.
 
+Authenticated socket clients may also join `lobby:queue` and push `quick_play` or `cancel`; the channel process owns its queue entry and receives `match_found` with the assigned match ID or `queue_error` on creation failure. The separate load-test bots use this same channel and match transport.
+
 Supervision tree:
 
 ```mermaid
@@ -77,7 +79,7 @@ At match end the match process atomically puts its final checkpoint and result i
 
 ## Observability
 
-Phoenix LiveDashboard is mounted at `/dashboard`, with the custom Arena page at `/dashboard/arena`; PromEx exports Prometheus text at `/metrics`. The added dependencies are `phoenix_live_dashboard ~> 0.8.7` and `prom_ex ~> 1.11.0`. The custom page shows node-local active population, tick/overrun counts and last duration, inbound/outbound message counts, and quick-play wait count and total; its in-memory counters reset on observability-process restart. PromEx separately exports histograms, counters and gauges from the same events. Metrics deliberately have no match/player labels to avoid unbounded cardinality and disclosing identifiers. The dashboard and metrics plug accept loopback `remote_ip` only; the application itself binds to loopback. A reverse proxy connecting from loopback must independently authenticate and restrict these paths, since forwarded headers are not treated as proof of client identity.
+Phoenix LiveDashboard is mounted at `/dashboard`, with the custom Arena page at `/dashboard/arena`; PromEx exports Prometheus text at `/metrics`. The added dependencies are `phoenix_live_dashboard ~> 0.8.7` and `prom_ex ~> 1.11.0`. The custom page shows node-local active population, tick/overrun counts and last duration, inbound/outbound message counts, and quick-play wait count and total; its in-memory counters reset on observability-process restart. PromEx separately exports histograms, counters and gauges from the same events. Metrics deliberately have no match/player labels to avoid unbounded cardinality and disclosing identifiers. The dashboard, metrics plug and `/loadtest/measurements` accept loopback `remote_ip` only; the application itself binds to loopback. A reverse proxy connecting from loopback must independently authenticate and restrict these paths, since forwarded headers are not treated as proof of client identity.
 
 | Telemetry event | Measurements | Metadata / meaning |
 | --- | --- | --- |
@@ -112,9 +114,11 @@ Phoenix socket topic `match:<match_id>` represents a match. A valid guest may jo
 
 The match serializes commands and determines their effective tick. Clients apply only the next consecutive delta, discard stale updates, and request `resync` after a gap or missing baseline; the periodic full snapshot is another recovery point. A match compares against the last *published* game, so a forfeit between ticks is included. `Arena.GameUpdates` uses Phoenix's channel fastlane dispatcher: the broadcast is encoded once per serializer per local PubSub dispatch and reused for all matching socket transports, rather than encoded once per player. Mixed serializers or distributed nodes each require their own encoding. Input sequence numbers and rate limits are not implemented.
 
+Tick-generated `state` and `delta` broadcasts also include `server_tick_at_ms`, the server wall-clock time at tick start, for same-host load testing. Join and recovery snapshots may omit it. Clients must not use this wall clock for simulation or authority.
+
 ### Message size measurement
 
-Measured with `node --test --test-concurrency=2 test/js/bandwidth.test.mjs`: a synthetic quiet tick with eight 22-character IDs, ten cells per snake, no food change and a `match:benchmark` topic encoded as Phoenix v2 JSON frames is **1,357 bytes full** versus **731 bytes delta** (UTF-8 JSON only, excluding WebSocket framing, compression and TLS). For 30 identical-sized ticks, the previous full-every-tick scheme is **40,710 bytes**, versus **22,556 bytes** for 29 deltas and one full snapshot, a **44.6%** reduction. This is a reproducible fixture calculation, not a measured running-server workload: body lengths, deaths, events, topic length and snapshot timing change real savings, and short snakes may yield larger deltas. The Elixir serializer and live network behavior remain unverified in the current environment.
+Measured with `node --test --test-concurrency=2 test/js/bandwidth.test.mjs`: a synthetic quiet tick with eight 22-character IDs, ten cells per snake, no food change and a `match:benchmark` topic encoded as Phoenix v2 JSON frames is **1,357 bytes full** versus **731 bytes delta** (UTF-8 JSON only, excluding WebSocket framing, compression, TLS and the subsequently added tick timestamp). For 30 identical-sized ticks, the previous full-every-tick scheme is **40,710 bytes**, versus **22,556 bytes** for 29 deltas and one full snapshot, a **44.6%** reduction. This is a reproducible fixture calculation, not a measured running-server workload: body lengths, deaths, events, topic length and snapshot timing change real savings, and short snakes may yield larger deltas. The Elixir serializer and live network behavior remain unverified in the current environment.
 
 ## Browser client
 

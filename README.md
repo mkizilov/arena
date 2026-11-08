@@ -14,6 +14,8 @@ Completed matches are written asynchronously to PostgreSQL, and `/leaderboard` s
 
 Local observability is available at `/dashboard/arena` and Prometheus metrics at `/metrics`. Both endpoints are restricted to loopback connections; a reverse proxy must also restrict access. See [DESIGN.md](DESIGN.md) for event definitions and measurement limitations.
 
+The separate `loadtest/` Mix project contains Slipstream WebSocket bots. [LOADTEST.md](LOADTEST.md) describes its bounded loopback-only protocol, measurement method and the currently unverified production runs.
+
 Game modules live in `assets/js/game/` and are embedded into the application at compile time; edits trigger recompilation. The browser receives Phoenix and LiveView's prebuilt ES modules from their installed dependencies, so no Node package installation or separate asset build is required. `floki` is a test-only dependency for LiveView tests.
 
 Match updates use deltas with periodic full snapshots and gap recovery; the reproducible synthetic bandwidth comparison is in [DESIGN.md](DESIGN.md).
