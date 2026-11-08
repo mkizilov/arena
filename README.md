@@ -1,6 +1,6 @@
 # Arena
 
-Phoenix application foundation for a server-authoritative multiplayer snake game. The planned rules and protocol are in [DESIGN.md](DESIGN.md); gameplay is not implemented in this stage.
+Phoenix application foundation for a server-authoritative multiplayer snake game. The pure simulation and planned transport protocol are described in [DESIGN.md](DESIGN.md); match processes and channels are not implemented yet.
 
 ## Local setup
 
