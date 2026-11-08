@@ -88,23 +88,54 @@ defmodule Arena.ClusterTest do
     assert_receive {:DOWN, ^monitor, :process, ^peer, _}, 5_000
 
     Enum.each(affected, fn {id, {_old, game}} ->
-      eventually(fn ->
-        case Horde.Registry.lookup(Arena.MatchRegistry, id) do
-          [{pid, _}] when node(pid) != victim ->
-            try do
-              Match.snapshot(id).game == game
-            catch
-              :exit, _ -> false
-            end
-
-          _ ->
-            false
-        end
-      end)
+      assert_recovered(id, game, victim, [node() | nodes] -- [victim])
 
       assert :ok = Match.tick(id)
       assert Match.snapshot(id).game.tick == game.tick + 1
     end)
+  end
+
+  defp assert_recovered(id, game, victim, survivors) do
+    eventually(fn ->
+      case Horde.Registry.lookup(Arena.MatchRegistry, id) do
+        [{pid, _}] when node(pid) != victim ->
+          try do
+            Match.snapshot(id).game == game
+          catch
+            :exit, _ -> false
+          end
+
+        _ ->
+          false
+      end
+    end)
+  rescue
+    error in ExUnit.AssertionError ->
+      details = Map.new(survivors, &{&1, recovery_diagnostics(&1, id)})
+
+      flunk(
+        "recovery of #{id} failed: #{Exception.message(error)}; survivors=#{inspect(details)}"
+      )
+  end
+
+  defp recovery_diagnostics(target, id) do
+    crdt =
+      :erpc.call(target, DeltaCrdt, :to_map, [:"Elixir.Arena.MatchSupervisor.Crdt", 1_000], 1_500)
+
+    children =
+      for {{:process, _}, {owner, %{start: {Match, :start_link, [{^id, _}]}}, pid}} <- crdt,
+          do: {owner, pid}
+
+    %{
+      connected: :erpc.call(target, Node, :list, [], 1_500),
+      registry: :erpc.call(target, Horde.Registry, :lookup, [Arena.MatchRegistry, id], 1_500),
+      supervisors: :erpc.call(target, Horde.Cluster, :members, [Arena.MatchSupervisor], 1_500),
+      child_specs: children
+    }
+  rescue
+    error -> %{error: Exception.message(error)}
+  catch
+    :exit, reason -> %{error: inspect(reason)}
   end
 
   defp start_peer do
