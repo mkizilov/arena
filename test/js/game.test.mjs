@@ -134,6 +134,12 @@ test("hook joins, sends controls and ping, updates scores, countdown and result,
   resync.ok({ state: { tick: 5, width: 40, height: 30, food: null, snakes: { a: { body: [[2, 1]], score: 2, alive: true } }, result: null } });
   assert.equal(hook.current.tick, 5);
   assert.equal(hook.previous, null);
+  handlers.match_recovering();
+  assert.equal(hook.phase, "recovering");
+  handlers.match_recovered();
+  assert.equal(sent.filter(([name]) => name === "resync").length, 2);
+  resync.ok({ state: hook.current, phase: "running" });
+  assert.equal(hook.phase, "running");
   handlers.status({ phase: "countdown", countdown_ms: 3000 });
   frame(performance.now());
   assert.match(status.textContent, /Starting in [123]/);

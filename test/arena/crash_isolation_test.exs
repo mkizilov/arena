@@ -10,7 +10,10 @@ defmodule Arena.CrashIsolationTest do
       Matchmaker.start_match(id, Keyword.merge([seed: {1, 2, 3}, countdown_ms: 0], opts))
 
     on_exit(fn ->
-      if Process.alive?(pid), do: DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Registry.lookup(Arena.MatchRegistry, id) do
+        [{current, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, current)
+        [] -> :ok
+      end
     end)
 
     assert :ok = Match.join(id, :a)
@@ -26,22 +29,22 @@ defmodule Arena.CrashIsolationTest do
       spawn(fn ->
         :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
         send(owner, {:subscribed, player})
-        wait_for_end(owner, player)
+        wait_for_recovery(owner, player)
       end)
 
     on_exit(fn -> send(pid, :stop) end)
     assert_receive {:subscribed, ^player}
   end
 
-  defp wait_for_end(owner, player) do
+  defp wait_for_recovery(owner, player) do
     receive do
-      {:match_ended_unexpectedly, id} -> send(owner, {:player_notified, player, id})
+      {:match_recovered, id, _pid} -> send(owner, {:player_notified, player, id})
       :stop -> :ok
-      _other -> wait_for_end(owner, player)
+      _other -> wait_for_recovery(owner, player)
     end
   end
 
-  test "a killed match is removed and its subscribers are notified without stopping other matches" do
+  test "a killed match recovers and notifies subscribers without stopping other matches" do
     {failed_id, failed_pid} = create_match(manual: true)
     {live_id, live_pid} = create_match()
     player_subscriber(failed_id, :a)
@@ -49,17 +52,22 @@ defmodule Arena.CrashIsolationTest do
     assert failed_id in Lobby.matches()
     assert live_id in Lobby.matches()
     assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "state", payload: %{state: %{tick: first_tick}}}, 1_000
+    assert :ok = Match.tick(failed_id)
+    before = Match.snapshot(failed_id).game
 
     ref = Process.monitor(failed_pid)
     Process.exit(failed_pid, :kill)
     assert_receive {:DOWN, ^ref, :process, ^failed_pid, :killed}, 1_000
-    assert_receive {:match_ended_unexpectedly, ^failed_id}, 1_000
+    assert_receive {:match_recovering, ^failed_id}, 1_000
+    assert_receive {:match_recovered, ^failed_id, recovered_pid}, 1_000
+    refute recovered_pid == failed_pid
+    assert Match.snapshot(failed_id).game == before
     assert_receive {:player_notified, :a, ^failed_id}, 1_000
     assert_receive {:player_notified, :b, ^failed_id}, 1_000
-    refute failed_id in Lobby.matches()
+    assert failed_id in Lobby.matches()
     assert live_id in Lobby.matches()
     assert Process.alive?(live_pid)
-    assert Registry.lookup(Arena.MatchRegistry, failed_id) == []
+    assert [{^recovered_pid, _}] = Registry.lookup(Arena.MatchRegistry, failed_id)
     assert_receive %Phoenix.Socket.Broadcast{topic: "match:" <> ^live_id, event: "delta", payload: %{tick: tick}} when tick > first_tick, 1_000
   end
 

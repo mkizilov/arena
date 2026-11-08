@@ -3,6 +3,15 @@ defmodule Arena.GameUpdates do
 
   alias ArenaWeb.GameJSON
 
+  def snapshot(id, game) do
+    Phoenix.Channel.Server.broadcast(
+      Arena.PubSub,
+      Arena.Match.topic(id),
+      "state",
+      %{state: GameJSON.render(game), events: []}
+    )
+  end
+
   def publish(id, previous, game, events) do
     {event, payload} =
       if game.tick == 1 or rem(game.tick, 30) == 0 do

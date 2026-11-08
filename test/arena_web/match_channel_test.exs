@@ -10,10 +10,13 @@ defmodule ArenaWeb.MatchChannelTest do
   defp start_match(opts \\ []) do
     id = "channel-#{System.unique_integer([:positive, :monotonic])}"
     :ok = Phoenix.PubSub.subscribe(Arena.PubSub, Match.topic(id))
-    {:ok, pid} = Match.start_match(id, opts)
+    {:ok, _pid} = Match.start_match(id, opts)
 
     on_exit(fn ->
-      if Process.alive?(pid), do: DynamicSupervisor.terminate_child(Arena.MatchSupervisor, pid)
+      case Registry.lookup(Arena.MatchRegistry, id) do
+        [{current, _}] -> DynamicSupervisor.terminate_child(Arena.MatchSupervisor, current)
+        [] -> :ok
+      end
     end)
 
     id
@@ -82,12 +85,16 @@ defmodule ArenaWeb.MatchChannelTest do
     assert_reply ref, :ok
   end
 
-  test "a crashed match notifies the connected channel" do
+  test "a crashed match restores the connected channel with a full snapshot" do
     {guest, socket} = guest_socket()
-    id = start_match(players: [guest.id, "other"], countdown_ms: 60_000)
+    id = start_match(players: [guest.id, "other"], countdown_ms: 0, manual: true)
+    assert_receive {:match_status, ^id, :running, _}
     assert {:ok, _, _channel} = subscribe_and_join(socket, MatchChannel, "match:" <> id)
+    assert :ok = Match.tick(id)
+    assert_push "state", %{state: %{tick: 1}}
     [{pid, _}] = Registry.lookup(Arena.MatchRegistry, id)
     Process.exit(pid, :kill)
-    assert_push "match_ended", %{reason: "unexpected"}, 1_000
+    assert_push "match_recovered", %{}, 1_000
+    assert_push "state", %{state: %{tick: 1}}, 1_000
   end
 end

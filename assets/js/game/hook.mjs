@@ -39,6 +39,15 @@ export function createGameHook(Socket) {
     this.channel.on("status", (status) => this.setStatus(status));
     this.channel.on("state", ({ state }) => this.setState(state));
     this.channel.on("delta", (delta) => this.receiveDelta(delta));
+    this.channel.on("match_recovering", () => {
+      this.phase = "recovering";
+      this.status.textContent = "Recovering match…";
+    });
+    this.channel.on("match_recovered", () => {
+      this.status.textContent = "Match recovered. Synchronizing…";
+      this.resyncing = false;
+      this.requestResync();
+    });
     this.channel.on("match_ended", ({ reason }) => {
       this.phase = "ended";
       this.status.textContent = `Match ended: ${reason}`;
@@ -100,11 +109,18 @@ export function createGameHook(Socket) {
     const next = applyDelta(this.current, delta);
     if (next) {
       this.setState(next);
-    } else if (!this.resyncing) {
+    } else {
+      this.requestResync();
+    }
+  },
+
+  requestResync() {
+    if (!this.resyncing) {
       this.resyncing = true;
       this.channel.push("resync", {})
-        .receive("ok", ({ state }) => {
+        .receive("ok", ({ state, phase, countdown_ms: countdownMs }) => {
           this.resyncing = false;
+          if (phase) this.setStatus({ phase, countdown_ms: countdownMs });
           this.setState(state);
         })
         .receive("error", () => { this.resyncing = false; })

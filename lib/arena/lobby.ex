@@ -88,25 +88,67 @@ defmodule Arena.Lobby do
   def handle_info(%Phoenix.Socket.Broadcast{event: event}, matches) when event in ["delta", "state"],
     do: {:noreply, matches}
   def handle_info({:match_ended_unexpectedly, _id}, matches), do: {:noreply, matches}
+  def handle_info({:match_recovering, _id}, matches), do: {:noreply, matches}
+  def handle_info({:match_disconnected, _id, _player}, matches), do: {:noreply, matches}
+  def handle_info({:match_reconnected, _id, _player}, matches), do: {:noreply, matches}
+
+  def handle_info({:match_recovered, id, pid}, matches) do
+    case Map.fetch(matches, id) do
+      {:ok, entry} when entry.pid != pid ->
+        Process.demonitor(entry.ref, [:flush])
+        if not entry.recovering do
+          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovering, id})
+        end
+        matches = Map.put(matches, id, track(pid))
+        publish(matches)
+        Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovered, id, pid})
+        {:noreply, matches}
+
+      _ ->
+        {:noreply, matches}
+    end
+  end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, matches) do
     case Enum.find(matches, fn {_id, entry} -> entry.pid == pid and entry.ref == ref end) do
       {id, _} ->
         if reason not in [:normal, :shutdown] and not match?({:shutdown, _}, reason) do
-          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_ended_unexpectedly, id})
+          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_recovering, id})
+          Process.send_after(self(), {:recovery_timeout, id, ref}, 5_000)
+          matches = update_in(matches[id], &%{&1 | recovering: true})
+          publish(matches)
+          {:noreply, matches}
+        else
+          Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
+          matches = Map.delete(matches, id)
+          publish(matches)
+          {:noreply, matches}
         end
-
-        Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
-        matches = Map.delete(matches, id)
-        publish(matches)
-        {:noreply, matches}
 
       nil ->
         {:noreply, matches}
     end
   end
 
-  defp track(pid), do: %{pid: pid, ref: Process.monitor(pid), snapshot: snapshot(pid)}
+  def handle_info({:recovery_timeout, id, ref}, matches) do
+    case Map.fetch(matches, id) do
+      {:ok, %{ref: ^ref, pid: pid}} ->
+        if Process.alive?(pid) do
+          {:noreply, matches}
+        else
+          Phoenix.PubSub.broadcast(Arena.PubSub, Match.topic(id), {:match_ended_unexpectedly, id})
+          Phoenix.PubSub.unsubscribe(Arena.PubSub, Match.topic(id))
+          matches = Map.delete(matches, id)
+          publish(matches)
+          {:noreply, matches}
+        end
+
+      _ ->
+        {:noreply, matches}
+    end
+  end
+
+  defp track(pid), do: %{pid: pid, ref: Process.monitor(pid), snapshot: snapshot(pid), recovering: false}
 
   defp snapshot(pid) do
     try do

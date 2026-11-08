@@ -11,7 +11,7 @@ defmodule ArenaWeb.MatchChannel do
   @impl true
   def join("match:" <> id, _payload, socket) when byte_size(id) > 0 do
     with {:ok, guest} <- Guest.verify(socket.assigns[:guest_token]),
-         {:ok, snapshot} <- admit(id, guest.id) do
+         {:ok, snapshot} <- match_call(fn -> Match.attach(id, guest.id, self()) end) do
       send(self(), :after_join)
       socket = socket |> assign(:match_id, id) |> assign(:guest, guest)
       {:ok,
@@ -33,7 +33,8 @@ defmodule ArenaWeb.MatchChannel do
 
   def handle_in("resync", _payload, socket) do
     case match_call(fn -> Match.snapshot(socket.assigns.match_id) end) do
-      {:ok, snapshot} -> {:reply, {:ok, %{state: GameJSON.render(snapshot.game)}}, socket}
+      {:ok, snapshot} ->
+        {:reply, {:ok, %{state: GameJSON.render(snapshot.game), phase: snapshot.phase, countdown_ms: snapshot.countdown_ms}}, socket}
       {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
     end
   end
@@ -98,24 +99,31 @@ defmodule ArenaWeb.MatchChannel do
     {:stop, :normal, socket}
   end
 
-  defp admit(id, player) do
-    with {:ok, snapshot} <- match_call(fn -> Match.snapshot(id) end) do
-      cond do
-        snapshot.phase == :finished -> {:error, :finished}
-        player in snapshot.players -> {:ok, snapshot}
-        true ->
-          with :ok <- match_call(fn -> Match.join(id, player) end),
-               {:ok, updated} <- match_call(fn -> Match.snapshot(id) end) do
-            {:ok, updated}
-          end
-      end
-    end
+  def handle_info({:match_recovering, id}, %{assigns: %{match_id: id}} = socket) do
+    push(socket, "match_recovering", %{})
+    {:noreply, socket}
+  end
+
+  def handle_info({:match_recovered, id, _pid}, %{assigns: %{match_id: id}} = socket) do
+    push(socket, "match_recovered", %{})
+    {:noreply, socket}
+  end
+
+  def handle_info({:match_disconnected, id, player}, %{assigns: %{match_id: id}} = socket) do
+    push(socket, "player_disconnected", %{player: player})
+    {:noreply, socket}
+  end
+
+  def handle_info({:match_reconnected, id, player}, %{assigns: %{match_id: id}} = socket) do
+    push(socket, "player_reconnected", %{player: player})
+    {:noreply, socket}
   end
 
   defp match_call(fun) do
     try do
       case fun.() do
         :ok -> :ok
+        {:ok, snapshot} -> {:ok, snapshot}
         {:error, reason} -> {:error, reason}
         snapshot -> {:ok, snapshot}
       end

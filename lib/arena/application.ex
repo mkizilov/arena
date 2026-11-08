@@ -7,7 +7,8 @@ defmodule Arena.Application do
     children = [
       {Phoenix.PubSub, name: Arena.PubSub},
       {Registry, keys: :unique, name: Arena.MatchRegistry},
-      {DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor},
+      Arena.MatchStore,
+      {DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor, max_restarts: 1_000, max_seconds: 5},
       Arena.Lobby,
       Arena.Matchmaker,
       {Task.Supervisor, name: Arena.TaskSupervisor},
