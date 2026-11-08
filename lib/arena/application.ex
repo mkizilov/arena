@@ -5,13 +5,17 @@ defmodule Arena.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      Arena.Repo,
       {Phoenix.PubSub, name: Arena.PubSub},
       {Registry, keys: :unique, name: Arena.MatchRegistry},
       {DynamicSupervisor, strategy: :one_for_one, name: Arena.MatchSupervisor},
+      Arena.Lobby,
+      Arena.Matchmaker,
+      {Task.Supervisor, name: Arena.TaskSupervisor},
+      Arena.Repo,
       ArenaWeb.Endpoint
     ]
-    Supervisor.start_link(children, strategy: :one_for_one, name: Arena.Supervisor)
+
+    Supervisor.start_link(children, strategy: :rest_for_one, name: Arena.Supervisor)
   end
 
   @impl true

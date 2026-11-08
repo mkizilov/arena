@@ -24,19 +24,28 @@ If all snakes die on the same tick, the result has no winners and reason `:simul
 
 `input(id, player, direction)` accepts a valid direction from a joined living player while running, retaining only the latest input until the next tick. `snapshot(id)` returns the current phase, ordered players and game state. A match runs at 15 ticks per second against deadlines derived from a monotonic epoch; if delayed, it catches up without skipping simulation ticks. `manual: true` disables automatic running ticks and allows `tick(id)` to advance exactly one tick. Options `:seed`, `:countdown_ms`, `:idle_ms`, and `:grace_ms` allow deterministic and bounded tests; a seed is generated at match creation if omitted. Countdown, idle and shutdown timers remain active in manual mode.
 
-Subscribers to `Arena.Match.topic(id)` on `Arena.PubSub` receive `{:match_status, id, phase, players}` on membership or phase changes and `{:match_tick, id, game, events}` after each tick, including the final tick. The published game is the Elixir core state, not a wire-format payload. The future channel is responsible for serialization, authentication and authorization. Calls for an unknown or already stopped match exit as normal `GenServer.call` failures; callers should handle that boundary.
+Subscribers to `Arena.Match.topic(id)` on `Arena.PubSub` receive `{:match_status, id, phase, players}` on membership or phase changes and `{:match_tick, id, game, events}` after each tick, including the final tick. If the match exits abnormally, the lobby publishes `{:match_ended_unexpectedly, id}` on the same topic; normal idle and grace shutdowns are not crashes. `Arena.Lobby.matches/0` lists live match process IDs (including finished matches during their grace period). `Arena.Matchmaker.start_match/2` provides a supervised creation entry point; automatic player matchmaking is not implemented. The published game is the Elixir core state, not a wire-format payload. The future channel must relay unexpected-end notifications as well as serialize state, authenticate and authorize players. Calls for an unknown or already stopped match exit as normal `GenServer.call` failures; callers should handle that boundary.
 
 Supervision tree:
 
-```text
-Arena.Supervisor (one_for_one)
-├── Arena.Repo
-├── Phoenix.PubSub (Arena.PubSub)
-├── Arena.MatchRegistry (unique match IDs)
-├── Arena.MatchSupervisor (one Arena.Match per active match)
-│   └── Arena.Match
-└── ArenaWeb.Endpoint (channels)
+```mermaid
+graph TD
+  App["Arena.Supervisor (rest_for_one)"]
+  App --> PubSub["Phoenix.PubSub (permanent)"]
+  App --> Registry["Arena.MatchRegistry (permanent)"]
+  App --> Matches["Arena.MatchSupervisor (permanent, one_for_one)"]
+  Matches --> Match["Arena.Match (temporary, one per match)"]
+  App --> Lobby["Arena.Lobby (permanent)"]
+  App --> Matchmaker["Arena.Matchmaker (permanent)"]
+  App --> Tasks["Arena.TaskSupervisor (permanent)"]
+  Tasks --> Task["Side-work tasks (temporary)"]
+  App --> Repo["Arena.Repo (permanent)"]
+  App --> Endpoint["ArenaWeb.Endpoint (permanent)"]
 ```
+
+The application uses `:rest_for_one` in the order shown: if PubSub or the registry fails, dependent matches and services restart rather than retain invalid connections or registrations; a match supervisor failure likewise rebuilds its dependents. A lobby failure leaves matches running, and the restarted lobby discovers and monitors surviving registered children before accepting new requests. Matchmaker, task supervisor, Repo and endpoint are permanent services restarted with their dependencies; Repo is late in the order so a database failure does not terminate matches. Individual side-work tasks are temporary and do not restart the task supervisor. Matches are temporary rather than transient because no durable snapshot exists: restarting a crashed process with its original arguments would silently replace an in-progress game with a fresh one. The lobby monitors each match and sends the crash notification before releasing its ID. A match can be recreated after the lobby processes its termination.
+
+Crash notifications are in-memory, best effort, and require a running lobby and PubSub; a lobby or PubSub outage concurrent with a match crash can lose a notification. Lobby recovery restores monitoring of surviving matches, not notifications for matches that disappeared while it was down. No channel transport exists yet, so network clients cannot receive these notifications until that transport is implemented.
 
 ## Planned protocol
 

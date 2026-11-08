@@ -13,7 +13,7 @@ defmodule Arena.Match do
 
   @doc "Starts a uniquely registered match under the match supervisor."
   def start_match(id, opts \\ []) when is_binary(id) and byte_size(id) > 0 do
-    DynamicSupervisor.start_child(Arena.MatchSupervisor, {__MODULE__, {id, opts}})
+    Arena.Lobby.start_match(id, opts)
   end
 
   @doc false
