@@ -80,4 +80,4 @@ The pre-publication verification used project-local Erlang/OTP 27.3.4.12, Elixir
 
 ## License
 
-Arena is distributed under the [MIT License](LICENSE), copyright 2026 Mykyta Kizilov. Third-party dependencies retain their own licenses; the production Docker build includes the available top-level license and notice files shipped with the downloaded production dependencies.
+Arena is distributed under the [MIT License](LICENSE), copyright 2026 Mykyta Kizilov.
